@@ -1,0 +1,20 @@
+{% extends 'base.html' %}
+{% block title %}스캔 전체 목록{% endblock %}
+{% block content %}
+<h2>저장된 모든 스캔 목록</h2>
+<ul id="scan-list"></ul>
+{% endblock %}
+{% block extra_script %}
+<script>
+fetch("/scan/all")
+  .then(res => res.json())
+  .then(data => {
+    const ul = document.getElementById("scan-list");
+    data.forEach(item => {
+      const li = document.createElement("li");
+      li.textContent = `ID: ${item.id}, URL: ${item.url}, 시간: ${item.scanned_at}`;
+      ul.appendChild(li);
+    });
+  });
+</script>
+{% endblock %}

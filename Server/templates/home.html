@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}홈{% endblock %}
+
+{% block content %}
+<h1 style="text-align: center; margin: 40px 0; font-size: 32px;">QR 스캔 & URL 분석 시스템</h1>
+
+<div id="search-section">
+  <form id="url-form">
+    <input type="text" id="url-input" name="url" placeholder="URL을 입력하세요" required />
+    <button type="submit">분석하기</button>
+  </form>
+</div>
+
+<div id="result-box" class="glass-card"></div>
+{% endblock %}
+
+{% block extra_script %}
+<style>
+    html, body {
+    background: linear-gradient(to bottom right, #f0f4ff, #d9e5ff);
+    font-family: 'Segoe UI', sans-serif;
+    margin: 0;
+    padding: 0;
+    height: 100%;
+  }
+
+  #search-section {
+    display: flex;
+    justify-content: center;
+    margin-top: 40px;
+  }
+
+  #url-form {
+    display: flex;
+    background: white;
+    padding: 16px 20px;
+    border-radius: 16px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+    gap: 12px;
+    max-width: 600px;
+    width: 100%;
+  }
+
+  #url-input {
+    flex: 1;
+    padding: 12px 16px;
+    font-size: 16px;
+    border: 2px solid #ddd;
+    border-radius: 12px;
+    outline: none;
+    transition: 0.2s ease-in-out;
+  }
+
+  #url-input:focus {
+    border-color: #007bff;
+    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+  }
+
+  button[type="submit"] {
+    padding: 12px 20px;
+    font-size: 16px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: 0.2s;
+  }
+
+  button[type="submit"]:hover {
+    background-color: #0056b3;
+  }
+
+  .glass-card {
+    display: none;
+    margin: 40px auto;
+    max-width: 600px;
+    background: rgba(255, 255, 255, 0.65);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    padding: 30px 40px;
+    font-size: 18px;
+    line-height: 1.8;
+    text-align: left;
+    color: #222;
+    animation: fadeIn 0.3s ease-in-out;
+  }
+
+  .url-ellipsis {
+    display: inline-block;
+    max-width: 500px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+    cursor: pointer;
+    color: #007bff;
+  }
+
+  .url-ellipsis:hover {
+    text-decoration: underline dotted;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+</style>
+
+<script>
+  document.getElementById("url-form").addEventListener("submit", function (e) {
+    e.preventDefault();  // ✅ HTML form의 실제 submit을 막음
+    const url = document.getElementById("url-input").value;
+
+    fetch("/analyze/", {  // ✅ /analyze/ ← 끝에 슬래시 필수
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: url }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        const label = (data.result || "").trim();
+        let resultText = "-";
+        if (label === "LEGITIMATE") resultText = "정상";
+        else if (label === "CAUTION") resultText = "주의";
+        else if (label === "MALICIOUS") resultText = "악성";
+
+        const domain = data.domain ?? "-";
+        const created = data.created ?? "-";
+        const expiry = data.expiry ?? "-";
+
+        let urlHtml = `<span class="url-ellipsis" title="${data.url}">${data.url}</span>`;
+        if (label === "CAUTION") {
+          urlHtml = `<a href="#" class="url-ellipsis caution-link" title="${data.url}">${data.url}</a>`;
+        } else if (label === "MALICIOUS") {
+          urlHtml = `<span class="url-ellipsis" title="${data.url}" style="color: red;">${data.url}</span><br><small style="color:red;">※ 이 URL은 악성입니다. 접속이 차단되었습니다.</small>`;
+        }
+
+        document.getElementById("result-box").innerHTML = `
+          <h2>분석 결과</h2>
+          <p><strong>URL:</strong> ${urlHtml}</p>
+          <p><strong>결과:</strong> ${resultText}</p>
+          <p><strong>도메인:</strong> ${domain}</p>
+          <p><strong>생성일:</strong> ${created}</p>
+          <p><strong>만료일:</strong> ${expiry}</p>
+        `;
+        document.getElementById("result-box").style.display = "block";
+      })
+      .catch((err) => {
+        alert("분석 실패: " + err.message);
+      });
+  });
+
+  // URL 클릭 시 이벤트
+  document.addEventListener("click", function (e) {
+    const isEllipsis = e.target.classList.contains("url-ellipsis");
+    const isCaution = e.target.classList.contains("caution-link");
+    const url = e.target.title;
+
+    if (isCaution) {
+      e.preventDefault();
+      const confirmOpen = confirm("주의: 위험할 수 있는 사이트입니다. 정말 접속하시겠습니까?");
+      if (confirmOpen) {
+        window.open(url, "_blank");
+      }
+    } else if (isEllipsis) {
+      navigator.clipboard.writeText(url);
+      alert("전체 URL이 클립보드에 복사되었습니다.");
+    }
+  });
+</script>
+{% endblock %}

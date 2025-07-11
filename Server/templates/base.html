@@ -1,0 +1,54 @@
+<!-- templates/base.html -->
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <title>{% block title %}QR 시스템{% endblock %}</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/style.css') }}"
+    />
+    <style>
+      #chatbot-icon {
+        position: fixed;
+        bottom: 80px;
+        right: 30px;
+        font-size: 48px;
+        cursor: pointer;
+      }
+      .nav-bar {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        background-color: #f0f0f0;
+        text-align: center;
+        padding: 10px 0;
+      }
+      .nav-bar button {
+        margin: 0 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">{% block content %}{% endblock %}</div>
+
+    <!-- 공통 하단 버튼 -->
+    <div class="nav-bar">
+      <button onclick="goTo('history')">히스토리</button>
+      <button onclick="goTo('home')">홈</button>
+      <button onclick="goTo('settings')">설정</button>
+    </div>
+
+    <!-- 챗봇 아이콘 -->
+    <div id="chatbot-icon" onclick="goTo('chatbot')">🤖</div>
+
+    <script>
+      function goTo(page) {
+        window.location.href = "/" + page;
+      }
+    </script>
+
+    {% block extra_script %}{% endblock %}
+  </body>
+</html>

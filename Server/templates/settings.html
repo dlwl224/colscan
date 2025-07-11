@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% block title %}설정{% endblock %}
+{% block content %}
+<h2>AI 분석 모드 설정</h2>
+<form>
+  <label><input type="radio" name="mode" checked> 초보자 모드 - 간단한 점수 & 조치</label><br>
+  <label><input type="radio" name="mode"> 전문가 모드 - 자세한 분석 & 위험도 표시</label>
+</form>
+
+{% if is_logged_in %}
+  <button onclick="location.href='/auth/logout'">로그아웃</button>
+{% else %}
+  <button onclick="location.href='/auth/login'">로그인</button>
+{% endif %}
+{% endblock %}

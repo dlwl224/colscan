@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+  <head>
+    <meta charset="UTF-8" />
+    <title>로그인</title>
+    <link rel="stylesheet" th:href="@{/css/common.css}" />
+    <style>
+      body {
+        font-family: "Segoe UI", sans-serif;
+      }
+
+      .login-container {
+        width: 320px;
+        margin: 140px auto 220px;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        padding: 30px;
+        background-color: white;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+      }
+
+      input[type="email"],
+      input[type="password"] {
+        width: 100%;
+        padding: 10px;
+        margin-top: 5px;
+        margin-bottom: 15px;
+        box-sizing: border-box;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+      }
+
+      button {
+        width: 100%;
+        padding: 10px;
+        background-color: rgba(99, 119, 156, 0.76);
+        color: white;
+        border: none;
+        border-radius: 4px;
+        font-weight: bold;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background-color: #365f91;
+      }
+
+      .login-links {
+        margin-top: 15px;
+        text-align: center;
+        font-size: 13px;
+      }
+
+      .login-links a {
+        margin: 0 10px;
+        color: #333;
+        text-decoration: none;
+      }
+
+      .login-links a:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- 로그인 폼 -->
+    <div class="login-container">
+      <h2 style="text-align: center">로그인</h2>
+
+      <form action="/auth/loginProc" method="post">
+        <!-- CSRF 토큰 (Flask-WTF 안 쓰면 생략) -->
+        <input type="hidden" name="redirectTo" id="redirectTo" />
+
+        <label for="email">이메일</label>
+        <input
+          type="email"
+          id="email"
+          name="email"
+          placeholder="이메일을 입력하세요"
+          required
+        />
+
+        <label for="password">비밀번호</label>
+        <input
+          type="password"
+          id="password"
+          name="password"
+          placeholder="비밀번호를 입력하세요"
+          required
+        />
+
+        <button type="submit">로그인</button>
+      </form>
+
+      <div class="login-links">
+        <a href="/auth/reset-password">비밀번호 재설정</a>
+        <a href="/auth/register">회원가입</a>
+        <a href="/auth/guest-login" style="font-weight: bold;">비회원으로 로그인</a>
+      </div>
+    </div>
+
+    <script>
+      // 로그인 전 redirect 위치 저장
+      document.addEventListener("DOMContentLoaded", function () {
+        const redirectTo = sessionStorage.getItem("redirectAfterLogin");
+        if (redirectTo) {
+          document.getElementById("redirectTo").value = redirectTo;
+          sessionStorage.removeItem("redirectAfterLogin");
+        }
+
+        const params = new URLSearchParams(window.location.search);
+        if (params.get("error") === "true") {
+          alert(
+            "로그인에 실패했습니다. 이메일 또는 비밀번호를 다시 확인해주세요."
+          );
+        }
+      });
+    </script>
+  </body>
+</html>

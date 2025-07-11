@@ -1,0 +1,24 @@
+{% extends 'base.html' %}
+{% block title %}URL 분류{% endblock %}
+{% block content %}
+<h2>URL 분류</h2>
+<input type="text" id="url-input" placeholder="URL을 입력하세요">
+<button onclick="classifyURL()">분석하기</button>
+<p id="result"></p>
+{% endblock %}
+{% block extra_script %}
+<script>
+function classifyURL() {
+  const url = document.getElementById('url-input').value;
+  fetch('/scan/classify', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ qr_code: url })
+  })
+  .then(res => res.json())
+  .then(data => {
+    document.getElementById('result').textContent = `결과: ${data.result} (출처: ${data.source})`;
+  });
+}
+</script>
+{% endblock %}

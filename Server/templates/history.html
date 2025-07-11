@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+{% block title %}히스토리{% endblock %}
+
+{% block content %}
+<h2>스캔 기록</h2>
+
+{% if not is_logged_in %}
+<p>최근 10개의 기록만 표시됩니다. 로그인하면 전체 기록 확인이 가능합니다.</p>
+{% endif %}
+
+<table border="1" style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+  <thead>
+    <tr>
+      <th>검색 날짜</th>
+      <th>URL</th>
+      <th>결과</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in scans %}
+    <tr>
+      <td>{{ item.analyzed_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+      <td>{{ item.url }}</td>
+      <td>{{ item.label }}</td>  <!-- ✅ 문자열 그대로 출력 -->
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
