@@ -9,7 +9,6 @@ from langchain.vectorstores import FAISS
 from langchain.agents import Tool
 from langchain.chains import RetrievalQA
 
-
 def build_rag_index_from_jsonl(
     jsonl_path: str,
     index_path: str,
@@ -34,8 +33,8 @@ def build_rag_index_from_jsonl(
     )
     docs: List[Document] = []
     for e in entries:
-        text    = e.get("text", "")
-        meta    = {
+        text = e.get("text", "")
+        meta = {
             "title":    e.get("title"),
             "subtitle": e.get("subtitle"),
             "source":   e.get("source")
@@ -59,15 +58,23 @@ def load_rag_tool(
 ) -> Tool:
     """
     FAISS 로컬 인덱스를 로드해서 LangChain RetrievalQA Tool로 감싸 반환합니다.
-    runtime 에 이 함수를 호출만 하면 곧바로 RAG가동 가능.
+    runtime 에 이 함수를 호출만 하면 곧바로 RAG 가동 가능.
     """
+    # 1) 임베딩 객체 생성
     embed = HuggingFaceEmbeddings(model_name=embedding_model)
-    db    = FAISS.load_local(index_path, embed)
-    qa    = RetrievalQA.from_chain_type(
+    # 2) FAISS 인덱스 로드 (pickle 안전 옵션 활성화)
+    db = FAISS.load_local(
+        index_path,
+        embed,
+        allow_dangerous_deserialization=True   # ← 신뢰된 인덱스 로드를 허용
+    )
+    # 3) RetrievalQA 체인 생성
+    qa = RetrievalQA.from_chain_type(
         llm=llm,
         chain_type="stuff",
         retriever=db.as_retriever()
     )
+    # 4) LangChain Tool로 감싸서 반환
     return Tool(
         name="SecurityDocsQA",
         func=lambda q: qa({"query": q})["result"],
