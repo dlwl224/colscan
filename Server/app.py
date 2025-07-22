@@ -53,13 +53,21 @@ def assign_guest_id():
         session["guest_id"] = str(uuid.uuid4())
 
 # ✅ 로그인 상태를 모든 템플릿에 전달
+# @app.context_processor
+# def inject_user_status():
+#     return {
+#         "is_logged_in": "user_id" in session,
+#         "nickname": session.get("nickname")
+#     }
 @app.context_processor
-def inject_user_status():
+def inject_user_context():
+    user_id = session.get("user_id")
+    is_guest = session.get("is_guest", False)
     return {
-        "is_logged_in": "user_id" in session,
+        "is_logged_in": bool(user_id),
+        "is_guest": is_guest,
         "nickname": session.get("nickname")
     }
-
 
 # 블루프린트 등록
 app.register_blueprint(home_bp)  # 기본 '/' 및 '/home' 경로용

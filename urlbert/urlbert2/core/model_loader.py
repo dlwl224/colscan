@@ -5,7 +5,7 @@ from transformers import AutoConfig, AutoModelForMaskedLM
 from pytorch_pretrained_bert import BertTokenizer 
 
 # config.py에서 필요한 모든 설정 값들을 임포트합니다.
-from urlbert.urlbert2.config import (
+from config import (
     VOCAB_FILE_PATH, BERT_CONFIG_DIR, BERT_PRETRAINED_MODEL_PATH,
     CLASSIFIER_MODEL_PATH, DEVICE, BERT_CONFIG_KWARTS
 )

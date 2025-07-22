@@ -19,7 +19,7 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 
-from urlbert.urlbert2.config import (
+from config import (
     PAD_SIZE, DEVICE, CLASS_LABELS, IMPORTANT_HEADERS,
     REQUEST_TIMEOUT_SECONDS, LIME_NUM_FEATURES, LIME_NUM_SAMPLES,
     TRUSTED_DOMAINS_FOR_EXPLANATION # 신뢰할 수 있는 도메인 목록
@@ -515,14 +515,12 @@ def classify_url_and_explain(url: str, model, tokenizer) -> dict:
 
 
     # 3) DB 저장용 필드명에 맞춰서 dict 반환
-    predicted_label = pred_out["predicted_label"]
-    is_mal= 1 if predicted_label == "malicious" else 0
+    is_mal = 1 if pred_out["predicted_label"] == "malicious" else 0
 
     return {
         "url": url,
         "header_info": pred_out["header_info"],
         "is_malicious": is_mal,
-        "predicted_label":   predicted_label,
         "confidence": pred_out["confidence"],    # float 타입
         "true_label": None,                      
         "reason_summary": lime_out["reason_summary"],
