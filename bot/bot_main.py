@@ -10,12 +10,11 @@ from langchain.memory import ConversationBufferMemory
 from langchain_community.llms import LlamaCpp
 from langchain.callbacks.manager import CallbackManager
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
-from langchain_core.prompts import PromptTemplate 
+from langchain_core.prompts import PromptTemplate
 from langchain_core.agents import AgentAction, AgentFinish
 from langchain_core.exceptions import OutputParserException
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-
 
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
@@ -52,8 +51,8 @@ llm = LlamaCpp(
     model_path=MODEL_GGUF_PATH,
     n_gpu_layers=-1, # -1은 가능한 모든 레이어를 GPU에 로드 (GPU 메모리가 허용하는 한)
     n_ctx=8192,      # Llama-3의 최대 컨텍스트 길이 (모델이 지원하는 최대값)
-    max_tokens=128,  # 256 -> 128으로 추가 조정 (반복성 극단적으로 감소 시도)
-    temperature=0.0, # 0.7 -> 0.0으로 변경 (모델의 '무작위성'을 최소화하여 ReAct 패턴을 잘 따르도록 함)
+    max_tokens=256,  # 256 유지
+    temperature=0.0, # 0.0 유지 (모델의 '무작위성'을 최소화하여 ReAct 패턴을 잘 따르도록 함)
     top_p=0.9,       # 상위 p 확률 분포 내에서 샘플링
     callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]),
     verbose=True,    # 자세한 로그 출력 (에이전트의 사고 과정 확인에 유용)
@@ -65,11 +64,11 @@ from urlbert.urlbert2.core.model_loader import load_inference_model as load_urlb
 try:
     urlbert_model, urlbert_tokenizer = load_urlbert_inference_model()
     url_tool = load_urlbert_tool(urlbert_model, urlbert_tokenizer)
-    print("✅ URL-BERT Tool 로드 완료.")
+    print("✅ URLBERT_ThreatAnalyzer Tool 로드 완료.")
 except Exception as e:
-    print(f"❌ URL-BERT Tool 로드 중 오류 발생: {e}")
+    print(f"❌ URLBERT_ThreatAnalyzer Tool 로드 중 오류 발생: {e}")
     print("urlbert 모듈 경로 설정 및 종속성 (DB_Manager 등)을 확인해주세요.")
-    url_tool = None 
+    url_tool = None
 
 
 # RAG 인덱스 경로 및 생성 로직
@@ -95,11 +94,11 @@ if not os.path.exists(RAG_INDEX_PATH):
 
 try:
     rag_tool = load_rag_tool(RAG_INDEX_PATH, llm)
-    print("✅ RAG Tool 로드 완료.")
+    print("✅ SecurityDocsQA Tool 로드 완료.")
 except Exception as e:
-    print(f"❌ RAG Tool 로드 중 오류 발생: {e}")
+    print(f"❌ SecurityDocsQA Tool 로드 중 오류 발생: {e}")
     print("RAG 인덱스 파일이 손상되었거나 임베딩 모델 로드에 문제가 있을 수 있습니다.")
-    rag_tool = None 
+    rag_tool = None
 
 chat_tool = Tool(
     name="Chat",
@@ -119,36 +118,41 @@ memory = ConversationBufferMemory(memory_key="chat_history")
 system_prompt = """
 <|begin_of_text|>
 너는 사용자에게 보안 관련 질문에 답변하고, URL의 위험성을 분석해주는 친절하고 정확한 인공지능 챗봇이야.
-다음은 네가 사용할 수 있는 도구 목록이야. 각 도구의 이름과 설명, 그리고 **정확한 사용 형식**을 숙지해야 해.
+모든 답변은 한국어로 해야 해.
 
-1.  **URLAnalyzer**: 사용자가 URL의 위험성을 분석해달라고 요청할 때 사용해. 특정 URL 주소가 포함된 질문에 사용해야 해.
-    **사용 형식 (정확히 이 형식대로만 출력):**
-    Thought: <URL 분석이 필요하다고 판단한 이유.>
-    Action: URLAnalyzer
-    Action Input: <분석할 URL 주소>
+다음은 네가 사용할 수 있는 도구 목록이야. 각 도구의 이름과 설명을 정확히 이해하고, 사용자의 질문 내용에 따라 가장 적절한 도구를 선택해야 해.
 
-2.  **SecurityDocsQA**: 보안 개념, 정의, 공격 유형, 예방 및 대응 방법 등 보안 관련 지식이나 문서 검색이 필요한 질문에 사용해.
-    **사용 형식 (정확히 이 형식대로만 출력):**
-    Thought: <보안 문서 검색이 필요하다고 판단한 이유.>
+1.  **URLBERT_ThreatAnalyzer**: 사용자가 **명시적으로 URL 주소를 제공하며 해당 URL의 안전성이나 위험성 분석을 요청할 때만** 사용해. 예를 들어, "이 URL 안전한가요? https://malicious.com" 과 같은 질문일 때 사용해. 다른 종류의 질문(예: 특정 공격 유형 설명 요청)에는 이 도구를 사용하지 마.
+    **사용 형식 (정확히 이 형식대로만 출력하고, 'Action Input:' 뒤에는 오직 URL만 넣어야 해):**
+    Thought: 사용자가 특정 URL의 분석을 요청했으므로 URLBERT_ThreatAnalyzer를 사용합니다.
+    Action: URLBERT_ThreatAnalyzer
+    Action Input: <분석할 URL 주소 (예: https://example.com)>
+
+2.  **SecurityDocsQA**: 보안 개념, 정의, 공격 유형 (예: 피싱, 스미싱, 큐싱, 랜섬웨어), 예방 및 대응 방법 등 **특정 URL 분석과 관련 없는 일반적인 보안 지식이나 문서 검색**이 필요한 질문에 사용해.
+    **사용 형식 (정확히 이 형식대로만 출력하고, 'Action Input:' 뒤에는 오직 검색할 질문만 넣어야 해):**
+    Thought: 사용자가 보안 관련 지식이나 개념에 대해 질문했으므로 SecurityDocsQA를 사용합니다.
     Action: SecurityDocsQA
-    Action Input: <검색할 질문>
+    Action Input: <검색할 질문 (예: 피싱이란?, 스미싱과 피싱의 차이)>
 
-3.  **Chat**: 위에 명시된 두 도구(URLAnalyzer, SecurityDocsQA)에 해당하지 않는 일반적인 대화, 인사, 잡담, 간단한 정보 질문에 답변할 때 사용해.
-    **사용 형식 (정확히 이 형식대로만 출력):**
-    Thought: <일반 대화라고 판단한 이유.>
+3.  **Chat**: 위에 명시된 두 도구(URLBERT_ThreatAnalyzer, SecurityDocsQA)에 **명백히 해당하지 않는 일반적인 대화, 인사, 잡담, 간단한 정보 질문**에 답변할 때 사용해. 이 도구를 사용할 때는 간결하고 자연스러운 대화 형식으로 답변해야 해.
+    **사용 형식 (정확히 이 형식대로만 출력하고, 'Action Input:' 뒤에는 오직 사용자 질문만 넣어야 해):**
+    Thought: 사용자가 일반적인 대화나 간단한 질문을 했으므로 Chat 도구를 사용합니다.
     Action: Chat
-    Action Input: <사용자 질문>
+    Action Input: <사용자 질문 전체 또는 대화에 적합한 요약된 질문 (예: 안녕하세요?, 오늘 날씨 어때요?)>
 
 너는 사용자의 질문을 가장 주의 깊게 분석하고, 위에 제시된 도구 사용 형식에 **정확히 일치하도록** `Action:`과 `Action Input:`을 출력해야 해.
+특히 `Action Input:`에는 **사용자 질문에서 추출한 구체적인 값만** 들어가야 해. 절대로 플레이스홀더(`url: str`)나 일반적인 설명 (`The suspicious URL...`)을 넣지 마.
+
 도구를 사용한 후에는 다음 형식으로 결과를 보고해야 해:
 Observation: <도구 실행 결과>
 그리고 마지막으로, 사용자의 **원래 질문의 의도**에 맞춰 친절하고 완전한 한국어 문장으로 최종 답변을 한 번만 제공해.
 
 --- 중요한 규칙 ---
-- 'Action:' 뒤에는 오직 도구 이름만 와야 해. 절대 괄호나 다른 문자열(예: 'Use', '(url: str)')을 붙이지 마.
+- 'Action:' 뒤에는 오직 도구 이름만 와야 해. 'Use'나 다른 불필요한 단어를 붙이지 마.
 - 'Action Input:' 뒤에는 도구에 전달할 순수한 입력 값만 와야 해.
-- 'Final Answer:'는 사용자가 이해하기 쉬운 완전한 한국어 문장으로 한 번만 제공하고, 절대로 반복하지 마. 다른 언어를 섞지 말고 한국어로만 답해.
+- 'Final Answer:'는 사용자가 이해하기 쉬운 완전한 한국어 문장으로 한 번만 제공하고, 절대로 반복하지 마. 다른 언어를 섞지 말고 한국어로만 답해. 불필요한 백틱(```)이나 추가적인 'Final Answer:' 접두사도 포함하지 마.
 - 만약 도구 사용 중 오류가 발생하면, 즉시 사용자에게 '현재 도구 사용에 문제가 있습니다. 다른 방법으로 시도하거나 잠시 후 다시 시도해주세요.'와 같이 명확하게 안내하고 최종 답변을 마무리해. 불필요한 추론을 반복하지 마.
+- 최종 답변(Final Answer)은 반드시 한국어로만 해.
 
 대화 기록:
 {chat_history}
@@ -166,59 +170,46 @@ prompt_template = PromptTemplate.from_template(system_prompt)
 class CustomReActOutputParser(AgentOutputParser):
     def parse(self, text: str) -> AgentAction | AgentFinish:
         # Final Answer 패턴 매칭을 가장 먼저 시도.
-        # 여러 'Final Answer:'가 있을 경우 첫 번째 유효한 것만 취함.
-        final_answer_match = re.search(r"Final Answer:\s*(.*?)(?=(Final Answer:|$))", text, re.DOTALL)
+        final_answer_match = re.search(r"Final Answer:\s*(.*?)(?:```|$|Final Answer:)", text, re.DOTALL)
         if final_answer_match:
+            # 추출된 답변에서 모든 'Final Answer:' 접두사와 불필요한 백틱을 제거
+            cleaned_answer = final_answer_match.group(1).replace("Final Answer:", "").replace("```", "").strip()
             return AgentFinish(
-                return_values={"output": final_answer_match.group(1).strip()},
+                return_values={"output": cleaned_answer},
                 log=text,
             )
 
-        # Action: ToolName(input) 패턴 처리
-        # Llama-3이 선호하는 함수 호출 형태.
-        action_function_call_match = re.search(r"Action:\s*(\w+)\((.*?)\)", text, re.DOTALL)
-        if action_function_call_match:
-            tool_name = action_function_call_match.group(1).strip()
-            tool_input = action_function_call_match.group(2).strip()
-            return AgentAction(tool=tool_name, tool_input=tool_input, log=text)
+        # Action 파싱 로직 강화: 'Use ' 같은 접두어를 무시하고 실제 툴 이름만 추출
+        # 'Action:' 뒤에 오는 가장 첫 번째 단어를 툴 이름으로 간주하고,
+        # Action Input을 찾아야 합니다.
+        action_match = re.search(r"Action:\s*(?:Use\s*)?(\w+)\s*(?:\((.*?)\))?\s*(?:\nAction Input:\s*(.*))?", text, re.DOTALL)
         
-        # Action: ToolName \n Action Input: input 패턴 처리 (LangChain 표준)
-        action_name_match = re.search(r"Action:\s*(\w+)", text)
-        action_input_match = re.search(r"Action Input:\s*(.*)", text, re.DOTALL)
+        if action_match:
+            tool_name = action_match.group(1).strip()
+            # 괄호 안의 입력 (group 2) 또는 Action Input: 뒤의 입력 (group 3)
+            tool_input_from_paren = action_match.group(2)
+            tool_input_from_newline = action_match.group(3)
 
-        if action_name_match and action_input_match:
-            tool_name = action_name_match.group(1).strip()
-            tool_input = action_input_match.group(1).strip()
-            return AgentAction(tool=tool_name, tool_input=tool_input, log=text)
+            tool_input = None
+            if tool_input_from_paren is not None:
+                tool_input = tool_input_from_paren.strip()
+            elif tool_input_from_newline is not None:
+                tool_input = tool_input_from_newline.strip()
 
-        # 'Action: Use ToolName' 또는 'Action: Try to use another tool' 같은 잘못된 패턴 처리
-        # LLM이 'Use', 'Try' 같은 불필요한 단어를 붙이는 경우를 최대한 포괄적으로 처리.
-        # 여기서 중요한 것은 `tool_name`만 정확히 뽑아내고, 나머지는 버려야 합니다.
-        misparsed_action_match = re.search(r"Action:\s*(?:Use\s*|Try\s*to\s*use\s*another\s*tool\s*from\s*the\s*list\.|Try\s*to\s*use\s*another\s*tool\.|Try\s*|Use\s*)?(\w+)(?:\s*\(.*?\))?(?:\s*->\s*str)?", text, re.DOTALL)
-        if misparsed_action_match:
-            tool_name_candidate = misparsed_action_match.group(1).strip()
             # 유효한 툴 이름인지 확인
             valid_tool_names = [tool.name for tool in tools]
-            if tool_name_candidate in valid_tool_names:
-                # 유효한 툴 이름이라면, 해당 툴의 Action Input을 찾기 시도
-                # 가장 가까운 Action Input을 찾도록 수정
-                input_start_index = text.find(misparsed_action_match.group(0)) # Action 시작 지점
-                next_action_input_match = re.search(r"Action Input:\s*(.*)", text[input_start_index:], re.DOTALL)
-                
-                if next_action_input_match:
-                    tool_input = next_action_input_match.group(1).strip()
-                    return AgentAction(tool=tool_name_candidate, tool_input=tool_input, log=text)
-                else:
-                    # Action Input이 없어도 일단 툴 액션으로 간주 (오류를 발생시키기보다 툴 호출 시도)
-                    print(f"DEBUG: Found '{tool_name_candidate}' but no explicit 'Action Input:' in segment.")
-                    # 최악의 경우, 프롬프트에서 'Action Input:' 줄이 없더라도 Action과 Tool Input이 붙어있을 수 있으므로
-                    # 전체 텍스트에서 'Action Input:' 부분을 찾지 못했다면, Action 뒤의 첫 줄을 Input으로 가정하는 것도 고려
-                    # 하지만 이는 매우 위험하므로, 일단은 None으로 처리하거나 예외 발생
-                    raise OutputParserException(f"Could not parse Action Input after '{tool_name_candidate}' for misparsed action: `{text}`")
+            if tool_name not in valid_tool_names:
+                raise OutputParserException(f"Invalid tool name found: '{tool_name}'. Expected one of {valid_tool_names}. Full text: `{text}`")
             
+            # Action Input이 비어있으면 파싱 오류 (프롬프트에서 Action Input이 필수임을 강조했기 때문)
+            if tool_input is None or not tool_input:
+                raise OutputParserException(f"Action Input is missing or empty for tool '{tool_name}'. Full text: `{text}`")
+
+            print(f"DEBUG: Parsed Action - Tool: '{tool_name}', Input: '{tool_input}'")
+            return AgentAction(tool=tool_name, tool_input=tool_input, log=text)
+        
         # 아무 패턴도 매칭되지 않을 경우 파싱 오류
-        # 모델이 반복적인 이상한 출력을 할 때 여기에 걸리도록 합니다.
-        raise OutputParserException(f"Could not parse LLM output: `{text}`")
+        raise OutputParserException(f"Could not parse LLM output (no valid Action or Final Answer found): `{text}`")
 
 # ✨ 커스텀 파서 인스턴스 생성
 custom_parser = CustomReActOutputParser()
@@ -235,8 +226,10 @@ agent = initialize_agent(
     agent_kwargs={
         "prompt": prompt_template,
         # Llama-3의 특성을 고려하여 stop 시퀀스를 더 강력하게 설정.
-        # 특히 \nFinal Answer: 를 추가하여 Final Answer를 생성하면 즉시 멈추도록 유도
-        "stop": ["\nObservation:", "\nThought:", "\nFinal Answer:", "<|eot_id|>"], 
+        # \nObservation: 다음 Thought로 넘어가기 전에 멈춤
+        # \nFinal Answer: 를 생성하면 즉시 멈추도록 유도
+        # <|eot_id|>는 Llama-3의 End Of Turn 토큰. 모델이 이걸 생성하면 멈춤.
+        "stop": ["\nObservation:", "\nFinal Answer:", "<|eot_id|>"],
         "output_parser": custom_parser, # ✨ 커스텀 파서 적용
     }
 )
@@ -246,28 +239,43 @@ print("✅ LangChain Agent 초기화 완료.")
 def chat(query: str) -> str:
     """
     Agent가 내부적으로:
-    - URL 패턴 감지 → URLAnalyzer 호출
+    - URL 패턴 감지 → URLBERT_ThreatAnalyzer 호출
     - 보안 개념 질문 감지 → SecurityDocsQA 호출
     - 그 외 → Chat 툴 (LLM 직접 응답)
     """
     try:
         response_dict = agent.invoke({"input": query})
         raw_output = response_dict.get('output', "응답을 생성하는 데 문제가 발생했습니다.")
+
+        # Final Answer 후처리: 파서에서 대부분 처리되지만, 혹시 모를 경우를 대비
+        raw_output = raw_output.replace("Final Answer:", "").replace("```", "").strip()
         
-        # 'Final Answer:'로 시작하는 경우, 접두어를 제거하고 한 번만 반환
-        if raw_output.strip().startswith("Final Answer:"):
-            return raw_output.replace("Final Answer:", "").strip()
+        # 마지막 문장이 반복되는 경우 제거 시도 (간단한 휴리스틱)
+        # LLM이 반복적인 출력을 하는 경향이 있으므로, 최종 출력에서 한 번 더 정리
+        sentences = re.split(r'(?<=[.?!])\s+', raw_output) # 문장 단위로 분리
+        if len(sentences) > 1:
+            # 마지막 문장이 이전 문장과 동일하거나 매우 유사하면 제거
+            if sentences[-1].strip() == sentences[-2].strip():
+                raw_output = " ".join(sentences[:-1]).strip()
+            # 또는 마지막 문장이 불필요하게 반복되는 패턴 (예: "안전합니다. 안전합니다.")
+            elif len(sentences[-1].strip()) < 10 and sentences[-1].strip() in sentences[-2].strip(): # 짧은 반복
+                 raw_output = " ".join(sentences[:-1]).strip()
         
-        # 그 외의 경우 (예: Chat 툴의 직접 출력)
-        return raw_output
+        # 한국어 답변이 아닌 경우 강제로 한국어 안내
+        if any(char for char in raw_output if '\uAC00' <= char <= '\uD7A3'): # 한글이 포함되어 있는지 확인
+            return raw_output.strip()
+        else:
+            return "죄송합니다. 답변이 명확하지 않습니다. 한국어로 다시 말씀해주시겠어요?"
 
     except OutputParserException as e:
         # LLM이 파싱할 수 없는 출력을 생성했을 때
         print(f"⚠️ 파싱 오류 발생: {e}")
-        return "죄송합니다. 현재 챗봇이 답변을 생성하는 데 문제가 발생했습니다. 질문을 명확하게 해주시면 감사하겠습니다."
+        # LLM의 'Thought'를 통해 오류의 원인을 유추하고 사용자에게 안내
+        return "죄송합니다. 챗봇이 답변을 이해하는 데 문제가 발생했습니다. 질문을 좀 더 명확하게 다시 해주시면 감사하겠습니다. (예: '이 URL 안전한가요? https://en.bab.la/dictionary/korean-english/%EC%A3%BC%EC%86%8C' 또는 '피싱이 뭔가요?')"
     except Exception as e:
         # 기타 예외 처리
-        return f"❌ 챗봇 처리 중 예측하지 못한 오류 발생: {e}"
+        print(f"❌ 챗봇 처리 중 예측하지 못한 오류 발생: {e}")
+        return f"죄송합니다. 챗봇 처리 중 내부 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
 
 if __name__ == "__main__":
     print("\n--- 챗봇 테스트 시작 ---")
