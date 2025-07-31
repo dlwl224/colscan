@@ -1,6 +1,7 @@
 import os
 import sys
 import re
+import json
 
 from langchain.agents import initialize_agent, AgentType, Tool
 from langchain.memory import ConversationBufferMemory
@@ -24,6 +25,11 @@ if urlbert_base not in sys.path:
 from bot.tools.urlbert_tool import load_urlbert_tool
 from bot.tools.rag_tools import load_rag_tool, build_rag_index_from_jsonl
 
+# URL 탐지 정규식 (http/https URL 및 도메인 형태 모두 감지)
+URL_PATTERN = re.compile(
+    r'(https?://\S+|(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\S*)'
+)
+
 # 1. LLM 세팅
 MODEL_PATH = os.path.join(project_root, 'models', 'gguf', 'llama-3-Korean-Bllossom-8B-Q4_K_M.gguf')
 if not os.path.exists(MODEL_PATH):
@@ -33,8 +39,8 @@ llm = LlamaCpp(
     model_path=MODEL_PATH,
     n_gpu_layers=-1,
     n_ctx=8192,
-    max_tokens=256,
-    temperature=0.2,
+    max_tokens=512,
+    temperature=0.01,
     top_p=0.9,
     callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]),
     verbose=True,
@@ -42,20 +48,37 @@ llm = LlamaCpp(
 
 # 2. 툴 인스턴스 생성
 # URL-BERT Tool
-from urlbert.urlbert2.core.model_loader import load_inference_model
-urlbert_model, urlbert_tokenizer = load_inference_model()
-url_tool = load_urlbert_tool(urlbert_model, urlbert_tokenizer)
+try:
+    from urlbert.urlbert2.core.model_loader import load_inference_model
+    urlbert_model, urlbert_tokenizer = load_inference_model()
+    url_tool = load_urlbert_tool(urlbert_model, urlbert_tokenizer)
+except Exception as e:
+    url_tool = Tool(
+        name="URLBERT_ThreatAnalyzer",
+        func=lambda x: f"URL 분석 툴 로드 중 오류 발생: {e}",
+        description="URL 안전성/위험성 분석"
+    )
 
 # RAG Tool (인덱스 없으면 생성)
-RAG_INDEX = os.path.join(project_root, 'security_faiss_index')
-RAG_DATA  = os.path.join(project_root, 'data', 'rag_dataset.jsonl')
-if not os.path.exists(RAG_INDEX):
-    build_rag_index_from_jsonl(RAG_DATA, RAG_INDEX)
-rag_tool = load_rag_tool(RAG_INDEX, llm)
+RAG_INDEX_DIR = os.path.join(project_root, 'security_faiss_index')
+RAG_DATA_PATH = os.path.join(project_root, 'data', 'rag_dataset.jsonl')
+if not os.path.exists(RAG_INDEX_DIR):
+    build_rag_index_from_jsonl(RAG_DATA_PATH, RAG_INDEX_DIR)
+rag_tool = load_rag_tool(RAG_INDEX_DIR, llm)
 
-# Chat Tool
+# Chat 툴 (일반 대화)
 def chat_fn(query: str) -> str:
-    return llm.invoke(query)
+    raw = llm.invoke(
+        query,
+        stop=["\nFinal Answer:", "<|eot_id|>", "\n", "\n\n", "Action:", "Thought:", "Observation:"]
+    )
+    cleaned = raw.strip()
+    cleaned = re.sub(r"^(Action:|Action Input:|Observation:|Thought:)", "", cleaned, flags=re.MULTILINE).strip()
+    if cleaned.lower().startswith(query.lower()):
+        cleaned = cleaned[len(query):].strip()
+    cleaned = re.sub(r'\.{3,}', '.', cleaned)
+    cleaned = re.sub(r'\s*\.{2,}\s*', '.', cleaned)
+    return cleaned
 chat_tool = Tool(
     name="Chat",
     func=chat_fn,
@@ -63,58 +86,48 @@ chat_tool = Tool(
 )
 
 tools = [url_tool, rag_tool, chat_tool]
+memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 
-# 3. 메모리
-memory = ConversationBufferMemory(memory_key="chat_history")
-
-# 4. 시스템 프롬프트 정의
-system_prompt = """
-<|begin_of_text|>
+# 4. 시스템 프롬프트
+system_prompt_for_agent = """
+<|begin_of_text|><|start_header_id|>system<|end_header_id|>
 너는 보안 전문가이자 URL 분석가인 한국어 챗봇이야.
-다음 도구를 활용하여 사용자 질문에 응답해:
-
-1. URLBERT_ThreatAnalyzer: 사용자가 URL의 안전성/위험성을 물어볼 때만 사용.
-2. SecurityDocsQA: 보안 개념 설명이나 문서 검색이 필요할 때 사용.
-3. Chat: 나머지 일반 대화용.
-
-모두 한국어로 답변하고, `Action:`과 `Action Input:` 형식은 반드시 지켜야 해.
-도구 사용 후 Observation을 보고, 마지막에 자연스러운 한국어 문장으로 최종 답변을 해줘.
-"""
-
-prompt_template = PromptTemplate.from_template(
-    system_prompt + "\n{chat_history}\n사용자: {input}\n{agent_scratchpad}"
+- URL 언급(HTTP/HTTPS 포함 또는 도메인 형태)이면 즉시 URLBERT_ThreatAnalyzer 툴 호출
+- 보안 개념 질문(피싱, SSL 등)이면 SecurityDocsQA 툴 호출 후 3문장 이내 한국어 요약
+- 그 외 일반 대화는 Chat 툴 호출
+마지막에는 'Final Answer:'만 붙이고, 즉시 종료해 추가 텍스트 금지
+<|eot_id|>"""
+final_agent_prompt = PromptTemplate.from_template(
+    system_prompt_for_agent + "<|start_header_id|>user<|end_header_id|>\n{input}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n{agent_scratchpad}"
 )
 
-# 5. 에이전트 초기화 (ZERO_SHOT_REACT_DESCRIPTION)
-agent = initialize_agent(
+agent_executor = initialize_agent(
     tools=tools,
     llm=llm,
     agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
     memory=memory,
     verbose=True,
     agent_kwargs={
-        "prompt": prompt_template,
-        "stop": ["\nObservation:", "\nThought:", "<|eot_id|>"],
+        "prompt": final_agent_prompt,
+        "stop": ["\nFinal Answer:", "<|eot_id|>"]
     }
 )
 
-# 6. 채팅 함수
-
-def chat(query: str) -> str:
-    try:
-        return agent.run(query)
-    except Exception as e:
-        return f"❌ 오류 발생: {e}"
-
-# 7. 인터랙티브 루프
-if __name__ == "__main__":
-    print("--- 챗봇 시작 (종료하려면 '종료' 입력) ---")
+# 5. 대화 루프
+if __name__ == '__main__':
+    print("--- 챗봇 시작 (종료: '종료') ---")
     while True:
         text = input("You ▶ ").strip()
-        if not text:
+        if text.lower() in {"종료","exit"}: break
+
+        # 문장 내 URL 감지 및 툴 직접 호출
+        match = URL_PATTERN.search(text)
+        if match:
+            url = match.group(1)
+            result = url_tool.func(url)
+            print(f"Bot ▶ Final Answer: {result}")
             continue
-        if text.lower() in {"종료", "exit", "quit"}:
-            print("챗봇을 종료합니다.")
-            break
-        response = chat(text)
-        print("Bot ▶", response)
+
+        # 에이전트 호출
+        out = agent_executor.invoke({"input": text}).get('output','')
+        print("Bot ▶", out)
