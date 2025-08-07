@@ -166,9 +166,7 @@ def get_urlbert_info_from_db(url: str) -> dict | None:
       - header_info (str|None)
       - is_malicious (int)
       - confidence (float|None)
-      - true_label (int|None)
-      - reason_summary (str|None)
-      - detailed_explanation (str|None)
+      - true_label (int|None)      
       - analysis_date (datetime)
     """
     sql = """
@@ -178,8 +176,6 @@ def get_urlbert_info_from_db(url: str) -> dict | None:
       is_malicious,
       confidence,
       true_label,
-      reason_summary,
-      detailed_explanation,
       analysis_date
     FROM urlbert_analysis
     WHERE url_hash = MD5(%s)
@@ -200,8 +196,7 @@ def save_urlbert_to_db(record: dict):
       - is_malicious (int)
       - confidence (float|None)
       - true_label (int|None)
-      - reason_summary (str|None)
-      - detailed_explanation (str|None)
+      
     """
     url         = record["url"]
     url_hash    = hashlib.md5(url.encode("utf-8")).hexdigest()
@@ -209,25 +204,20 @@ def save_urlbert_to_db(record: dict):
     is_mal      = int(record["is_malicious"])
     conf        = record.get("confidence")
     true_lbl    = record.get("true_label")
-    summary     = record.get("reason_summary")
-    detail      = record.get("detailed_explanation")
-
+    
     sql = """
     INSERT INTO urlbert_analysis
-      (url, url_hash, header_info, is_malicious, confidence, true_label,
-       reason_summary, detailed_explanation)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+      (url, url_hash, header_info, is_malicious, confidence, true_label)
+    VALUES (%s, %s, %s, %s, %s,%s)
     ON DUPLICATE KEY UPDATE
       header_info          = VALUES(header_info),
       is_malicious         = VALUES(is_malicious),
       confidence           = VALUES(confidence),
       true_label           = VALUES(true_label),
-      reason_summary       = VALUES(reason_summary),
-      detailed_explanation = VALUES(detailed_explanation),
       analysis_date        = CURRENT_TIMESTAMP
     """
     params = (
-        url, url_hash, header_info, is_mal, conf, true_lbl, summary, detail
+        url, url_hash, header_info, is_mal, conf, true_lbl
     )
 
     conn = get_connection()

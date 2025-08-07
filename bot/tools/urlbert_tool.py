@@ -30,7 +30,7 @@ def load_urlbert_tool(model, tokenizer) -> Tool:
                 f"{header_info}\n"
                 f"악성 여부: {malicious}\n"
                 f"신뢰도: {confidence}\n"
-                f"요약: {db_res.get('reason_summary') or 'N/A'}"
+                
             )
 
         # 2) 모델 분석
@@ -40,9 +40,7 @@ def load_urlbert_tool(model, tokenizer) -> Tool:
             "header_info":          result.get("header_info"),
             "is_malicious":         int(result["is_malicious"]),
             "confidence":           float(result["confidence"]),
-            "true_label":           result.get("true_label", None),
-            "reason_summary":       result.get("reason_summary"),
-            "detailed_explanation": result.get("detailed_explanation")
+            "true_label":           result.get("true_label", None)
         }
 
         # 3) DB 저장 (예외 허용)
@@ -61,7 +59,7 @@ def load_urlbert_tool(model, tokenizer) -> Tool:
             f"{header_str}\n"
             f"악성 여부: {malicious}\n"
             f"신뢰도: {confidence}\n"
-            f"요약: {rec['reason_summary']}"
+            
         )
 
     return Tool(
