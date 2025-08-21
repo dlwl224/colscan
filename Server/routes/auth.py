@@ -3,30 +3,73 @@ from flask import Blueprint, render_template, request, redirect, url_for, sessio
 from models.user_dao import UserDAO
 from werkzeug.security import generate_password_hash, check_password_hash
 from models.history_dao import HistoryDAO
+from urllib.parse import urlparse, urljoin
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
+
+#안전리다이렉트체크용
+def _is_safe_url(target: str) -> bool:
+    if not target:
+        return False
+    base = urlparse(request.host_url)
+    test = urlparse(urljoin(request.host_url, target))
+    return test.scheme in ("http", "https") and base.netloc == test.netloc
 
 @auth_bp.route("/login", methods=["GET"])
 def login_page():
     return render_template("auth/login.html")
 
+# @auth_bp.route("/loginProc", methods=["POST"])
+# def login_proc():
+#     email = request.form.get("email")
+#     if user and check_password_hash(user["password"], password):
+#         guest_id = session.get("guest_id")  # ⬅️ 로그인 전 guest_id 백업
+#         session.clear()                    # ⬅️ 세션 초기화
+
+#         session["user_id"] = user["id"]
+#         session["nickname"] = user["nickname"]
+
+#         # ✅ guest 기록을 user 기록으로 마이그레이션
+#         if guest_id:
+#             HistoryDAO.migrate_guest_to_user(guest_id, user["id"])
+
+#         return redirect(request.form.get("redirectTo", "/home"))
+#     else:
+#         return redirect(url_for("auth.login_page") + "?error=true")
+
 @auth_bp.route("/loginProc", methods=["POST"])
 def login_proc():
-    email = request.form.get("email")
-    if user and check_password_hash(user["password"], password):
-        guest_id = session.get("guest_id")  # ⬅️ 로그인 전 guest_id 백업
-        session.clear()                    # ⬅️ 세션 초기화
+    # ✅ 1) 폼 값 안전하게 꺼내기 (password 빠져 있어서 크래시 났음)
+    email = request.form.get("email", "")
+    password = request.form.get("password", "")
+    redirect_to = request.form.get("redirectTo", "")
 
+    # ✅ 2) 사용자 조회 (user를 먼저 정의해야 함)
+    user = UserDAO.find_by_email(email)
+
+    if user and check_password_hash(user["password"], password):
+        # ✅ 3) 게스트 id 백업 → 세션 초기화 → 회원 세션 세팅
+        prev_guest_id = session.get("guest_id")
+        session.clear()
         session["user_id"] = user["id"]
         session["nickname"] = user["nickname"]
+        session["is_guest"] = False
 
-        # ✅ guest 기록을 user 기록으로 마이그레이션
-        if guest_id:
-            HistoryDAO.migrate_guest_to_user(guest_id, user["id"])
+        # ✅ 4) 게스트 기록 이관 (있을 때만)
+        if prev_guest_id:
+            try:
+                HistoryDAO.migrate_guest_to_user(prev_guest_id, user["id"])
+            except Exception as e:
+                print(f"[WARN] migrate guest->user fail: guest={prev_guest_id}, user={user['id']}, err={e}")
 
-        return redirect(request.form.get("redirectTo", "/home"))
-    else:
-        return redirect(url_for("auth.login_page") + "?error=true")
+        # ✅ 5) 안전한 리다이렉트: 비거나 외부면 기본 경로(/settings)로 폴백
+        if _is_safe_url(redirect_to):
+            return redirect(redirect_to, code=303)
+        return redirect("/settings", code=303)
+
+    # ❌ 로그인 실패
+    return redirect(url_for("auth.login_page") + "?error=true", code=303)
+
 
 @auth_bp.route("/logout")
 def logout():
