@@ -8,7 +8,11 @@
 </form>
 
 {% if is_logged_in %}
-  <button onclick="location.href='/auth/logout'">로그아웃</button>
+  {% if is_guest %}
+    <button onclick="location.href='/auth/login'">회원으로 시작하기</button>
+  {% else %}
+    <button onclick="location.href='/auth/logout'">로그아웃</button>
+  {% endif %}
 {% else %}
   <button onclick="location.href='/auth/login'">로그인</button>
 {% endif %}

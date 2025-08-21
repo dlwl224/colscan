@@ -21,9 +21,10 @@
     <tr>
       <td>{{ item.analyzed_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
       <td>{{ item.url }}</td>
-      <td>{{ item.label }}</td>  <!-- ✅ 문자열 그대로 출력 -->
+      <td>{{ item.label }}</td>  3✅ 문자열 그대로 출력
     </tr>
     {% endfor %}
   </tbody>
 </table>
 {% endblock %}
+<script src="{{ url_for('static', filename='js/history.js') }}"></script>

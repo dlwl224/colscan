@@ -27,7 +27,7 @@
 # if __name__ == "__main__":
 #     app.run(debug=True, use_reloader=False, threaded=True)
 
-from flask import Flask, session
+from flask import Flask, request, session
 import uuid
 from datetime import timedelta
 
@@ -81,4 +81,11 @@ app.register_blueprint(settings_bp, url_prefix="/settings")
 app.register_blueprint(auth_bp)
 
 if __name__ == "__main__":
-    app.run(debug=True, use_reloader=False, threaded=True)
+    app.run(host="0.0.0.0", port=5000,debug=True, use_reloader=False, threaded=True)
+
+@app.before_request
+def _log_req():
+    try:
+        print(f"[REQ] {request.method} {request.path} json={request.get_json(silent=True)}")
+    except Exception:
+        print(f"[REQ] {request.method} {request.path} (no json)")

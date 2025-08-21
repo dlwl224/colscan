@@ -1,0 +1,51 @@
+/* 기본 전체 여백 */
+.clean-table-wrapper {
+  margin-top: 20px;
+  background: white;
+  padding: 20px;
+  border-radius: 12px;
+  border: 1px solid #e0e0e0;
+  max-width: 800px;
+  margin-left: auto;
+  margin-right: auto;
+  font-family: 'Segoe UI', sans-serif;
+}
+
+/* 테이블 기본 */
+.clean-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15px;
+}
+
+/* 헤더 스타일 */
+.clean-table thead th {
+  background-color: #f1f3f5;
+  color: #333;
+  padding: 12px 10px;
+  text-align: left;
+  border-bottom: 2px solid #d0d0d0;
+  font-weight: 600;
+}
+
+/* 행 스타일 */
+.clean-table tbody td {
+  padding: 10px;
+  border-bottom: 1px solid #eee;
+  color: #444;
+  word-break: break-word;
+}
+
+/* 라벨 색상 */
+.label-legitimate {
+  color: #2196F3;
+  font-weight: bold;
+}
+.label-caution {
+  color: #FFA500;
+  font-weight: bold;
+}
+.label-malicious {
+  color: #f44336;
+  font-weight: bold;
+}
