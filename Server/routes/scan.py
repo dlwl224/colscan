@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 import datetime
-from models.scan_dao import ScanDAO
+from Server.models.scan_dao import ScanDAO
 
 scan_bp = Blueprint("scan", __name__)
 
@@ -48,5 +48,5 @@ def classify_qr():
 
     # 👉 ML 모델 예측 연결 예시
     from predict_model import predict_url_safety
-    result = predict_url_safety(url)  # 예: 안전, 주의, 위험 반환
+    result = predict_url_safety(url)  # 예: 안전, 위험 반환
     return jsonify({"result": result, "source": "ml_model"}), 200

@@ -1,3 +1,4 @@
+{# 
 {% extends 'base.html' %}
 {% block title %}설정{% endblock %}
 {% block content %}
@@ -16,4 +17,297 @@
 {% else %}
   <button onclick="location.href='/auth/login'">로그인</button>
 {% endif %}
+{% endblock %} #}
+
+
+
+
+{% extends 'base.html' %}
+{% block title %}설정{% endblock %}
+
+{% block content %}
+<div class="settings-page">
+  <h1>설정</h1>
+
+  <!-- 계정 -->
+  <section class="sec" id="sec-account">
+    <h2>계정</h2>
+
+    {% if is_logged_in %}
+    <div class="row">
+      <div>
+        <div>아이디(이메일)</div>
+        <div class="muted">{{ session.get("user_id") }}</div>
+      </div>
+      <div class="muted">로그인 상태</div>
+    </div>
+    <div class="row">
+      <div>
+        <div>이름(닉네임)</div>
+        <div class="muted">{{ session.get("nickname") or "-" }}</div>
+      </div>
+      <div class="toolbar">
+        <a class="btn outline" href="/auth/logout">로그아웃</a>
+        <a class="btn outline" href="/auth/reset-password">비밀번호 변경</a>
+        <!-- 소셜 연동(더미) -->
+        <button class="btn outline" onclick="alert('카카오 연동 준비 중')">카카오 연동</button>
+        <button class="btn outline" onclick="alert('구글 연동 준비 중')">구글 연동</button>
+      </div>
+    </div>
+    {% else %}
+    <div class="row">
+      <div>
+        <div>로그인 필요</div>
+        <div class="muted">로그인하면 히스토리 전체 조회, 설정 동기화가 가능합니다.</div>
+      </div>
+      <div class="toolbar">
+        <a class="btn" href="/auth/login">로그인하기</a>
+        <a class="btn outline" href="/auth/guest-login">비회원으로 계속</a>
+        <!-- 소셜 로그인(더미) -->
+        <button class="btn outline" onclick="location.href='/auth/login'">카카오로 로그인</button>
+        <button class="btn outline" onclick="location.href='/auth/login'">구글로 로그인</button>
+      </div>
+    </div>
+    {% endif %}
+  </section>
+
+  <!-- 개인정보·보안 -->
+  <section class="sec" id="sec-privacy">
+    <h2>개인정보·보안</h2>
+    <div class="row">
+      <div>
+        <div>카메라 권한</div>
+        <div class="muted">QR 스캔을 위해 사용</div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="privacy_camera" {{ 'checked' if (settings.privacy.camera if settings else True) else '' }}>
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="row">
+      <div>
+        <div>저장소 권한</div>
+        <div class="muted">분석 결과/로그 임시 저장</div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="privacy_storage" {{ 'checked' if (settings.privacy.storage if settings else True) else '' }}>
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="row">
+      <div>
+        <div>데이터 수집 동의</div>
+        <div class="muted">오류 로그/분석 통계 개선 목적</div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="privacy_consent" {{ 'checked' if (settings.privacy.data_consent if settings else True) else '' }}>
+        <span class="slider"></span>
+      </label>
+    </div>
+  </section>
+
+  <!-- 표시·접근성 -->
+  <section class="sec" id="sec-display">
+    <h2>표시·접근성</h2>
+    <div class="row">
+      <div>
+        <div>테마</div>
+        <div class="muted">라이트/다크</div>
+      </div>
+      <select id="display_theme">
+        {% set theme_val = (settings.display.theme if settings else 'light') %}
+        <option value="light" {{ 'selected' if theme_val=='light' else '' }}>라이트</option>
+        <option value="dark"  {{ 'selected' if theme_val=='dark'  else '' }}>다크</option>
+      </select>
+    </div>
+    <div class="row">
+      <div>
+        <div>글자 크기</div>
+        <div class="muted"><span id="fontScaleLabel">{{ (settings.display.font_scale if settings else 100) }}</span>%</div>
+      </div>
+      <input id="display_font" type="range" min="80" max="140" step="5" value="{{ (settings.display.font_scale if settings else 100) }}">
+    </div>
+  </section>
+
+  <!-- 언어 -->
+  <section class="sec" id="sec-language">
+    <h2>언어</h2>
+    <div class="row">
+      <div>
+        <div>표시 언어</div>
+        <div class="muted">한국어/영어</div>
+      </div>
+      {% set lang_val = (settings.language if settings else 'ko') %}
+      <select id="lang_select">
+        <option value="ko" {{ 'selected' if lang_val=='ko' else '' }}>한국어</option>
+        <option value="en" {{ 'selected' if lang_val=='en' else '' }}>English</option>
+      </select>
+    </div>
+  </section>
+
+  <!-- 히스토리 -->
+  <section class="sec" id="sec-history">
+    <h2>히스토리</h2>
+    <div class="row">
+      <div>
+        <div>기본 필터</div>
+        <div class="muted">설정에서 누르면 히스토리 페이지로 이동</div>
+      </div>
+      {% set hist_val = (settings.history.default_filter if settings else 'all') %}
+      <select id="history_filter">
+        <option value="all"      {{ 'selected' if hist_val=='all' else '' }}>전체</option>
+        <option value="legit"    {{ 'selected' if hist_val=='legit' else '' }}>정상</option>
+        <option value="malicious"{{ 'selected' if hist_val=='malicious' else '' }}>악성</option>
+      </select>
+    </div>
+    <div class="row">
+      <div class="muted">현재 필터로 히스토리 열기</div>
+      <button class="btn" onclick="openHistory()">히스토리로 이동</button>
+    </div>
+  </section>
+
+  <!-- 챗봇 -->
+  <section class="sec" id="sec-chatbot">
+    <h2>챗봇</h2>
+    <div class="row">
+      <div>
+        <div>응답 모드</div>
+        <div class="muted">일반 / 심화(전문가)</div>
+      </div>
+      {% set mode_val = (settings.chatbot.mode if settings else 'normal') %}
+      <select id="chatbot_mode">
+        <option value="normal" {{ 'selected' if mode_val=='normal' else '' }}>일반</option>
+        <option value="pro"    {{ 'selected' if mode_val=='pro' else '' }}>심화</option>
+      </select>
+    </div>
+    <div class="row">
+      <div class="muted">챗봇 페이지에 즉시 반영됩니다.</div>
+      <a class="btn outline" href="/chatbot/">챗봇 열기</a>
+    </div>
+  </section>
+
+  <!-- 저장 버튼 -->
+  <div class="footer-actions">
+    <button class="btn outline" onclick="resetToDefault()">기본값 복원</button>
+    <button class="btn" onclick="saveSettings()">저장</button>
+  </div>
+</div>
+
+<!-- 토스트 -->
+<div class="toast" id="toast">저장되었습니다</div>
+
+<!-- 페이지 전용 스타일 -->
+<style>
+  .settings-page { max-width:900px; margin:24px auto; padding:0 16px; }
+  .settings-page h1{font-size:22px; margin:16px 0 24px;}
+  .settings-page .sec{background:var(--card, #f5f5f7); border-radius:16px; padding:16px; margin-bottom:16px;}
+  .settings-page .sec h2{font-size:18px; margin:0 0 12px;}
+  .settings-page .row{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 0; border-top:1px solid rgba(127,127,127,.15);}
+  .settings-page .row:first-of-type{border-top:none;}
+  .settings-page .muted{color:var(--muted, #666); font-size:13px;}
+  .settings-page .btn{background:var(--pri, #2563eb); color:#fff; border:none; padding:8px 12px; border-radius:10px; cursor:pointer;}
+  .settings-page .btn.outline{background:transparent; color:var(--pri, #2563eb); border:1px solid var(--pri, #2563eb);}
+  .settings-page select, .settings-page input[type="range"]{padding:8px; border-radius:10px; border:1px solid rgba(127,127,127,.3); background:transparent; color:inherit;}
+  .settings-page .switch{position:relative; width:44px; height:24px;}
+  .settings-page .switch input{opacity:0; width:0; height:0;}
+  .settings-page .slider{position:absolute; cursor:pointer; inset:0; background:#bbb; transition:.2s; border-radius:999px;}
+  .settings-page .slider:before{position:absolute; content:""; height:18px; width:18px; left:3px; top:3px; background:#fff; transition:.2s; border-radius:50%;}
+  .settings-page input:checked + .slider{background:var(--pri, #2563eb);}
+  .settings-page input:checked + .slider:before{transform:translateX(20px);}
+  .settings-page .toolbar{display:flex; gap:8px; flex-wrap:wrap;}
+  .settings-page .footer-actions{display:flex; gap:8px; justify-content:flex-end;}
+  .toast{position:fixed; left:50%; transform:translateX(-50%); bottom:24px; background:#111; color:#fff; padding:10px 14px; border-radius:10px; opacity:0; pointer-events:none; transition:.2s;}
+  .toast.show{opacity:0.95;}
+</style>
+
+<!-- 페이지 전용 스크립트 -->
+<script>
+  // 테마를 <html>에 반영 (base.html이 <html>을 소유하므로 data-theme 속성만 토글)
+  (function initThemeFromServer(){
+    const theme = "{{ (settings.display.theme if settings else 'light') }}";
+    document.documentElement.setAttribute('data-theme', theme === 'dark' ? 'dark' : 'light');
+  })();
+
+  const fontRange = document.getElementById('display_font');
+  const fontLabel = document.getElementById('fontScaleLabel');
+
+  fontRange.addEventListener('input', () => {
+    fontLabel.textContent = fontRange.value;
+    document.documentElement.style.fontSize = (fontRange.value/100) + 'em';
+  });
+
+  function collectSettings(){
+    return {
+      privacy:{
+        camera: document.getElementById('privacy_camera').checked,
+        storage: document.getElementById('privacy_storage').checked,
+        data_consent: document.getElementById('privacy_consent').checked,
+      },
+      display:{
+        theme: document.getElementById('display_theme').value,
+        font_scale: parseInt(document.getElementById('display_font').value, 10),
+      },
+      language: document.getElementById('lang_select').value,
+      history:{ default_filter: document.getElementById('history_filter').value },
+      chatbot:{ mode: document.getElementById('chatbot_mode').value },
+    }
+  }
+
+  function applyTheme(theme){
+    document.documentElement.setAttribute('data-theme', theme === 'dark' ? 'dark' : 'light');
+  }
+
+  async function saveSettings(){
+    const payload = collectSettings();
+    const res = await fetch('/settings', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if(data && data.ok){
+      applyTheme(payload.display.theme);
+      showToast('저장되었습니다');
+    }else{
+      showToast('저장 실패');
+    }
+  }
+
+  function resetToDefault(){
+    // 화면상만 기본으로 되돌림 (저장은 눌러야 반영)
+    document.getElementById('privacy_camera').checked = true;
+    document.getElementById('privacy_storage').checked = true;
+    document.getElementById('privacy_consent').checked = true;
+
+    document.getElementById('display_theme').value = 'light';
+    document.getElementById('lang_select').value = 'ko';
+    document.getElementById('history_filter').value = 'all';
+    document.getElementById('chatbot_mode').value = 'normal';
+
+    document.getElementById('display_font').value = 100;
+    fontLabel.textContent = 100;
+    document.documentElement.style.fontSize = '1em';
+    applyTheme('light');
+    showToast('기본값으로 복원 (저장 필요)');
+  }
+
+  function openHistory(){
+    const f = document.getElementById('history_filter').value;
+    location.href = `/settings/go-history?filter=${encodeURIComponent(f)}`;
+  }
+
+  let toastTimer=null;
+  function showToast(text){
+    const t = document.getElementById('toast');
+    t.textContent = text;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(()=>t.classList.remove('show'), 1500);
+  }
+
+  // 초기 폰트 스케일 반영
+  (function init(){
+    document.documentElement.style.fontSize = (parseInt(fontRange.value,10)/100)+'em';
+  })();
+</script>
 {% endblock %}

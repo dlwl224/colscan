@@ -1,4 +1,4 @@
-from DB_conn import get_connection
+from Server.DB_conn import get_connection
 
 class HistoryDAO:
 

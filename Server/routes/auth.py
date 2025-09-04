@@ -1,8 +1,8 @@
 # routes/auth.py
 from flask import Blueprint, render_template, request, redirect, url_for, session, jsonify
-from models.user_dao import UserDAO
+from Server.models.user_dao import UserDAO
 from werkzeug.security import generate_password_hash, check_password_hash
-from models.history_dao import HistoryDAO
+from Server.models.history_dao import HistoryDAO
 from urllib.parse import urlparse, urljoin   # ← (추가) 안전한 URL 체크용
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")

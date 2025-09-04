@@ -1,14 +1,14 @@
 # app.py 
 # from flask import Flask 
-# from routes.home import home_bp 
-# from routes.scan import scan_bp 
-# from routes.analyze import analyze_bp 
-# from routes.history import history_bp 
-# from routes.chatbot import chatbot_bp 
-# from routes.classify import classify_bp 
-# from routes.scan_list import scan_list_bp 
-# from routes.settings import settings_bp 
-# from routes.auth import auth_bp 
+# from Server.routes.home import home_bp 
+# from Server.routes.scan import scan_bp 
+# from Server.routes.analyze import analyze_bp 
+# from Server.routes.history import history_bp 
+# from Server.routes.chatbot import chatbot_bp 
+# from Server.routes.classify import classify_bp 
+# from Server.routes.scan_list import scan_list_bp 
+# from Server.routes.settings import settings_bp 
+# from Server.routes.auth import auth_bp 
 
 # app = Flask(__name__) 
 # app.secret_key = "your-very-secret-key" 
@@ -33,15 +33,15 @@ from flask import Flask, request, session
 import uuid 
 from datetime import timedelta 
 
-from routes.home import home_bp 
-from routes.scan import scan_bp 
-from routes.analyze import analyze_bp 
-from routes.history import history_bp 
-from routes.chatbot import chatbot_bp 
-from routes.classify import classify_bp 
-from routes.scan_list import scan_list_bp 
-from routes.settings import settings_bp 
-from routes.auth import auth_bp 
+from Server.routes.home import home_bp 
+from Server.routes.scan import scan_bp 
+from Server.routes.analyze import analyze_bp 
+from Server.routes.history import history_bp 
+from Server.routes.chatbot import chatbot_bp 
+from Server.routes.classify import classify_bp 
+from Server.routes.scan_list import scan_list_bp 
+from Server.routes.settings import settings_bp 
+from Server.routes.auth import auth_bp 
 
 
 app = Flask(__name__) 
