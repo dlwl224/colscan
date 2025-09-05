@@ -104,7 +104,7 @@ def predict_url(url: str, model, tokenizer) -> dict:
         "predicted_label": predicted_label,
         "confidence": confidence, # 0~1 사이 값으로 반환
         "predicted_class_id": predicted_class_id,
-        "header_info": header_info # LIME 설명을 위해 헤더 정보도 함께 반환
+        "header_info": header_info 
     }
 # --- 3. URL 분류 및 설명을 통합하는 함수 ---
 def classify_url_and_explain(url: str, model, tokenizer) -> dict:

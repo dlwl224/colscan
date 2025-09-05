@@ -18,7 +18,7 @@ BERT_MODEL_DIR = os.path.join(PROJECT_ROOT, 'bert_model')
 BERT_PRETRAINED_MODEL_PATH = os.path.join(BERT_MODEL_DIR, 'urlBERT (1).pt')
 
 CLASSIFIER_CHECKPOINTS_DIR = os.path.join(PROJECT_ROOT, 'finetune', 'phishing', 'checkpoints')
-CLASSIFIER_MODEL_PATH = os.path.join(CLASSIFIER_CHECKPOINTS_DIR, 'modelx_URLBERT_81.pth')
+CLASSIFIER_MODEL_PATH = os.path.join(CLASSIFIER_CHECKPOINTS_DIR, 'modelx_URLBERT_82.pth')
 
 # --- 2. 모델 및 학습 관련 설정 ---
 PAD_SIZE=512

@@ -16,9 +16,7 @@ def get_connection():
     3. 연결 실패 시 오류 메시지를 출력하고 None을 반환
     """
     
-    # 환경 변수에서 데이터베이스 정보 출력 (디버깅용)
-    print(f"DB_HOST: {os.getenv('DB_HOST')}")
-    print(f"DB_PORT: {os.getenv('DB_PORT')}")
+    
     
     try:
         # pymysql.connect()를 사용하여 데이터베이스 연결을 시도
@@ -33,9 +31,6 @@ def get_connection():
             cursorclass=pymysql.cursors.DictCursor
         )
         
-        print("DB_USER:", os.getenv('DB_USER'))
-        print("DB_PASSWORD:", os.getenv('DB_PASSWORD'))
-        print("DB_NAME:", os.getenv('DB_NAME'))
 
         # 연결 성공 메시지 출력
         print("✅ MySQL 연결 성공!")

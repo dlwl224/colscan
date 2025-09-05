@@ -27,7 +27,6 @@ llm = ChatGoogleGenerativeAI(
     model="gemini-2.0-flash",
     temperature=0.01
 )
-
 # 2) 툴 로드
 from bot.tools.urlbert_tool import load_urlbert_tool
 from bot.tools.rag_tools import load_rag_tool, build_rag_index_from_jsonl
@@ -69,7 +68,48 @@ URL_PATTERN = re.compile(
     r'(https?://\S+|(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\S*)'
 )
 
-# 3) 대화 루프: URL → URLBERT / 아니면 RAG → 실패 시 Chat
+
+
+def get_chatbot_response(query: str) -> dict:
+    """
+    사용자 질문(query)을 받아, 상황에 맞는 챗봇 답변을 dict 형태로 반환합니다.
+    """
+    text = query.strip()
+    
+    # 1) URL 포함 시 -> URLBERT 툴 사용
+    match = URL_PATTERN.search(text)
+    if match:
+        url = match.group(1)
+        analysis_text = url_tool.func(url)
+        # 답변과 함께 어떤 종류의 답변인지(mode)를 함께 반환
+        return {"answer": analysis_text, "mode": "url_analysis"}
+
+    # 2) RAG(문서 검색) 시도
+    rag_out = rag_tool.func(text)
+    rag_answer = rag_out.get("answer", "")
+    rag_found = rag_out.get("found", False)
+    not_found_message = "해당 정보는 문서에서 찾을 수 없습니다."
+
+    # 'found'가 True이고, 답변이 있으며, '못 찾았다'는 메시지가 아닐 때만 성공으로 간주
+    if rag_found and rag_answer and not_found_message not in rag_answer:
+        sources = []
+        if rag_out.get("sources"):
+            seen, uniq = set(), []
+            for s in rag_out["sources"]:
+                if s not in seen:
+                    seen.add(s)
+                    uniq.append(s)
+            sources = uniq[:5]
+        return {"answer": rag_answer, "mode": "rag", "sources": sources}
+
+    # 3) 위 두 경우에 해당하지 않으면 일반 대화
+    chat_answer = chat_tool.func(text)
+    return {"answer": chat_answer, "mode": "chat"}
+
+
+
+
+# 3) 대화 루프: 직접 이 파일을 실행했을 때 테스트용으로만 사용되도록 변경
 if __name__ == '__main__':
     print("--- 챗봇 시작 (종료: '종료') ---")
     while True:
@@ -83,41 +123,21 @@ if __name__ == '__main__':
         if not text:
             continue
 
-        # 1) URL 포함 → URLBERT (규칙 1: 확실한 제어)
-        match = URL_PATTERN.search(text)
-        if match:
-            url = match.group(1)
-            result = url_tool.func(url)
-            print(f"Bot ▶ Final Answer: {result}")
-            continue
-
-        # 2) RAG 우선 (규칙 2: 확실한 제어)
-        rag_out = rag_tool.func(text)
-
-        # RAG 실패 조건을 명확히 하여, 실패 시 Chat으로 넘어가도록 수정
-        rag_answer = rag_out.get("answer", "")
-        rag_found = rag_out.get("found", False)
-        not_found_message = "해당 정보는 문서에서 찾을 수 없습니다."
-
-        # 'found'가 True이고, 답변이 있으며, '못 찾았다'는 메시지가 아닐 때만 성공으로 간주
-        if rag_found and rag_answer and not_found_message not in rag_answer:
+        # [수정] 위에서 만든 함수를 호출하여 결과를 받도록 변경
+        response = get_chatbot_response(text)
+        
+        # [수정] 응답 형식에 맞게 출력 변경
+        answer = response.get("answer")
+        mode = response.get("mode")
+        
+        if mode == "rag":
             print("🔍 [RAG 문서 기반 응답]")
-            print(f"Bot ▶ Final Answer: {rag_answer}")
-            
-            if rag_out.get("sources"):
-                # (기존 소스 출력 코드)
-                seen, uniq = set(), []
-                for s in rag_out["sources"]:
-                    if s not in seen:
-                        seen.add(s)
-                        uniq.append(s)
-                if uniq:
-                    print("📚 [출처]")
-                    for s in uniq[:5]:
-                        print(" -", s)
-            continue
+        elif mode == "chat":
+            print("💬 [일반 Chat 응답]")
 
-        # 3) RAG에서 못 찾으면 → Chat (규칙 3: 백업 플랜)
-        print("💬 [일반 Chat 응답]")
-        chat_out = chat_tool.func(text)
-        print(f"Bot ▶ Final Answer: {chat_out}")
+        print(f"Bot ▶ Final Answer: {answer}")
+        
+        if response.get("sources"):
+            print("📚 [출처]")
+            for s in response["sources"]:
+                print(" -", s)
