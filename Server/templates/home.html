@@ -5,18 +5,18 @@
 <h1 style="text-align: center; margin: 40px 0; font-size: 32px;">QR 스캔 & URL 분석 시스템</h1>
 
 <div id="search-section">
-  <form id="url-form">
+  <form id="url-form" autocomplete="off">
     <input type="text" id="url-input" name="url" placeholder="URL을 입력하세요" required />
     <button type="submit">분석하기</button>
   </form>
 </div>
 
-<div id="result-box" class="glass-card"></div>
+<div id="result-box" class="glass-card" aria-live="polite"></div>
 {% endblock %}
 
 {% block extra_script %}
 <style>
-    html, body {
+  html, body {
     background: linear-gradient(to bottom right, #f0f4ff, #d9e5ff);
     font-family: 'Segoe UI', sans-serif;
     margin: 0;
@@ -104,66 +104,101 @@
 
   @keyframes fadeIn {
     from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
+    to   { opacity: 1; transform: translateY(0); }
   }
 </style>
 
 <script>
-  document.getElementById("url-form").addEventListener("submit", function (e) {
-    e.preventDefault();  // ✅ HTML form의 실제 submit을 막음
-    const url = document.getElementById("url-input").value;
+  // 서버가 템플릿에서 내려주는 로그인 상태 (회원/비회원 로그인 판별)
+  const IS_LOGGED_IN = "true" === "true";   // true
+  const IS_GUEST     = "false" === "true";  // false
 
-    fetch("/analyze/", {  // ✅ /analyze/ ← 끝에 슬래시 필수
+  document.getElementById("url-form").addEventListener("submit", function (e) {
+    e.preventDefault();  // ✅ form 기본 submit 막기
+
+    // ✅ 회원/비회원 로그인 둘 다 아니라면 로그인 페이지로 우회
+    if (!IS_LOGGED_IN && !IS_GUEST) {
+      // 로그인 후 돌아올 경로 저장
+      sessionStorage.setItem("redirectAfterLogin", window.location.pathname + window.location.search);
+      window.location.href = "/auth/login";
+      return;
+    }
+
+    const inputEl = document.getElementById("url-input");
+    const url = (inputEl.value || "").trim();
+    if (!url) {
+      alert("URL을 입력하세요.");
+      inputEl.focus();
+      return;
+    }
+
+    fetch("/analyze/", {  // ✅ /analyze/ (슬래시 포함)
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: url }),
+      body: JSON.stringify({ url }),
+      credentials: "same-origin"
     })
-      .then((res) => res.json())
-      .then((data) => {
-        const label = (data.result || "").trim();
-        let resultText = "-";
-        if (label === "LEGITIMATE") resultText = "정상";
-        else if (label === "CAUTION") resultText = "주의";
-        else if (label === "MALICIOUS") resultText = "악성";
+    .then(res => res.json())
+    .then((data) => {
+      // ⛔ 비회원 5개 초과: 모달 띄우고 끝 (DB 저장 금지)
+      if (data.popup) {
+        const modal = document.getElementById('loginModal');
+        if (modal) modal.style.display = 'flex';
+        return;
+      }
 
-        const domain = data.domain ?? "-";
-        const created = data.created ?? "-";
-        const expiry = data.expiry ?? "-";
+      const label = (data.result || "").trim().toUpperCase();
+      let resultText = label === "LEGITIMATE" ? "정상"
+                    : label === "MALICIOUS" ? "악성"
+                    : "주의";
 
-        let urlHtml = `<span class="url-ellipsis" title="${data.url}">${data.url}</span>`;
-        if (label === "CAUTION") {
-          urlHtml = `<a href="#" class="url-ellipsis caution-link" title="${data.url}">${data.url}</a>`;
-        } else if (label === "MALICIOUS") {
-          urlHtml = `<span class="url-ellipsis" title="${data.url}" style="color: red;">${data.url}</span><br><small style="color:red;">※ 이 URL은 악성입니다. 접속이 차단되었습니다.</small>`;
-        }
+       // [추가] 신뢰도: 숫자(0~1)면 퍼센트로 변환, 아니면 원본/하이픈
+      const confidence = (typeof data.confidence === "number" && !Number.isNaN(data.confidence))
+        ? `${(data.confidence * 100).toFixed(1)}%`
+        : (data.confidence ?? "-");
 
-        document.getElementById("result-box").innerHTML = `
-          <h2>분석 결과</h2>
-          <p><strong>URL:</strong> ${urlHtml}</p>
-          <p><strong>결과:</strong> ${resultText}</p>
-          <p><strong>도메인:</strong> ${domain}</p>
-          <p><strong>생성일:</strong> ${created}</p>
-          <p><strong>만료일:</strong> ${expiry}</p>
-        `;
-        document.getElementById("result-box").style.display = "block";
-      })
-      .catch((err) => {
-        alert("분석 실패: " + err.message);
-      });
+      // [추가] 출처: db/model 값을 보기 좋게
+      const source = data.source === "db" ? "DB"
+                   : data.source === "model" ? "모델"
+                   : (data.source || "-");
+
+      // [추가] 검색일시: 서버 제공값 우선, 없으면 클라이언트 시각
+      const searchedAt = data.date ?? new Date().toLocaleString();
+      // -----------------------------
+
+      let urlHtml = `<span class="url-ellipsis" title="${data.url}">${data.url}</span>`;
+      if (label === "CAUTION") {
+        urlHtml = `<a href="#" class="url-ellipsis caution-link" title="${data.url}">${data.url}</a>`;
+      } else if (label === "MALICIOUS") {
+        urlHtml = `<span class="url-ellipsis" title="${data.url}" style="color: red;">${data.url}</span><br><small style="color:red;">※ 이 URL은 악성입니다. 접속이 차단되었습니다.</small>`;
+      }
+
+      const box = document.getElementById("result-box");
+      box.innerHTML = `
+        <h2>분석 결과</h2>
+        <p><strong>URL:</strong> ${urlHtml}</p>
+        <p><strong>결과:</strong> ${resultText}</p>
+        <p><strong>신뢰도:</strong> ${confidence}</p>     <!-- [변경: 신뢰도 표시] -->
+        <p><strong>출처:</strong> ${source}</p>           <!-- [변경: DB/모델 표기] -->
+        <p><strong>검색일시:</strong> ${searchedAt}</p>   <!-- [변경: 검색 날짜/시간] -->
+      `;
+      box.style.display = "block";
+    })
+    .catch((err) => {
+      alert("분석 실패: " + err.message);
+    });
   });
 
-  // URL 클릭 시 이벤트
+  // URL 클릭 핸들러 (그대로 유지)
   document.addEventListener("click", function (e) {
     const isEllipsis = e.target.classList.contains("url-ellipsis");
-    const isCaution = e.target.classList.contains("caution-link");
+    const isCaution  = e.target.classList.contains("caution-link");
     const url = e.target.title;
 
     if (isCaution) {
       e.preventDefault();
-      const confirmOpen = confirm("주의: 위험할 수 있는 사이트입니다. 정말 접속하시겠습니까?");
-      if (confirmOpen) {
-        window.open(url, "_blank");
-      }
+      const ok = confirm("주의: 위험할 수 있는 사이트입니다. 정말 접속하시겠습니까?");
+      if (ok) window.open(url, "_blank");
     } else if (isEllipsis) {
       navigator.clipboard.writeText(url);
       alert("전체 URL이 클립보드에 복사되었습니다.");

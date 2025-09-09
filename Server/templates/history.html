@@ -1,3 +1,4 @@
+{# templates/history.html #}
 {% extends 'base.html' %}
 {% block title %}히스토리{% endblock %}
 
@@ -5,26 +6,61 @@
 <h2>스캔 기록</h2>
 
 {% if not is_logged_in %}
-<p>최근 10개의 기록만 표시됩니다. 로그인하면 전체 기록 확인이 가능합니다.</p>
+  <p>
+    비회원은 최근 <strong>5개</strong>의 기록만 표시됩니다.
+    로그인하면 전체 기록을 확인하고 더 많이 저장할 수 있어요.
+    <a href="/auth/login">로그인하기</a>
+  </p>
+{% else %}
+  <form method="get" action="{{ url_for('history.history') }}" style="margin: 12px 0;">
+    <input type="hidden" name="filter" value="{{ current_filter }}">
+    <input type="text" name="q" value="{{ q }}" placeholder="URL 검색" style="width: 280px;">
+    <button type="submit">검색</button>
+  </form>
 {% endif %}
 
-<table border="1" style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+<table border="1" style="width: 100%; border-collapse: collapse; margin-top: 12px;">
   <thead>
     <tr>
-      <th>검색 날짜</th>
+      <th style="width: 200px;">검색 날짜</th>
       <th>URL</th>
-      <th>결과</th>
+      <th style="width: 140px;">결과</th>
     </tr>
   </thead>
   <tbody>
     {% for item in scans %}
-    <tr>
-      <td>{{ item.analyzed_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-      <td>{{ item.url }}</td>
-      <td>{{ item.label }}</td>  3✅ 문자열 그대로 출력
-    </tr>
+      <tr>
+        <td>
+          {% if item.analyzed_at %}
+            {{ item.analyzed_at.strftime('%Y-%m-%d %H:%M:%S') }}
+          {% else %}
+            -
+          {% endif %}
+        </td>
+        <td>{{ item.url }}</td>
+        <td>{{ item.label }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="3" style="text-align:center;">기록이 없습니다.</td></tr>
     {% endfor %}
   </tbody>
 </table>
+
+{% if is_logged_in and pages and pages > 1 %}
+  <div style="margin-top: 12px; display:flex; gap:8px; align-items:center;">
+    {% set prev_page = page - 1 %}
+    {% set next_page = page + 1 %}
+    {% if page > 1 %}
+      <a href="{{ url_for('history.history', page=prev_page, per_page=per_page, q=q, filter=current_filter) }}">&laquo; 이전</a>
+    {% endif %}
+    <span>페이지 {{ page }} / {{ pages }}</span>
+    {% if page < pages %}
+      <a href="{{ url_for('history.history', page=next_page, per_page=per_page, q=q, filter=current_filter) }}">다음 &raquo;</a>
+    {% endif %}
+  </div>
+{% endif %}
 {% endblock %}
+
+{% block scripts %}
 <script src="{{ url_for('static', filename='js/history.js') }}"></script>
+{% endblock %}

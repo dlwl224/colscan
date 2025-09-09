@@ -48,6 +48,13 @@ app = Flask(__name__)
 app.secret_key = "your-very-secret-key" 
 app.permanent_session_lifetime = timedelta(days=30) 
 
+# ✅ 세션 쿠키 보강
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",   # 외부 리다이렉트 시 세션 손실 방지
+    SESSION_COOKIE_SECURE=False,     # 로컬 개발(http)에서는 False, 배포(https) 환경에서는 True 권장
+    SESSION_PERMANENT=True,
+)
 
 # ✅ guest_id 세션 자동 생성 + 유지 
 @app.before_request 
@@ -56,22 +63,15 @@ def assign_guest_id():
     if "user_id" not in session and "guest_id" not in session: 
         session["guest_id"] = str(uuid.uuid4()) 
 
-
+# ✅ 모든 요청 로깅
 @app.before_request 
 def _log_req(): 
     try: 
         print(f"[REQ] {request.method} {request.path} json={request.get_json(silent=True)}") 
     except Exception: 
         print(f"[REQ] {request.method} {request.path} (no json)")
+
 # ✅ 로그인 상태를 모든 템플릿에 전달 
-# @app.context_processor 
-# def inject_user_status(): 
-# return { 
-# "is_logged_in": "user_id" in session, 
-# "nickname": session.get("nickname") 
-# } 
-
-
 @app.context_processor 
 def inject_user_context():
     user_id = session.get("user_id") 
@@ -80,6 +80,7 @@ def inject_user_context():
             "is_guest": is_guest, 
             "nickname": session.get("nickname") 
             } 
+
 # 블루프린트 등록 
 app.register_blueprint(home_bp) # 기본 '/' 및 '/home' 경로용 
 app.register_blueprint(scan_bp, url_prefix="/scan") 
