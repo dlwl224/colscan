@@ -1,10 +1,12 @@
 # bot_main4.py
-# 목적: 파인튜닝된 LLaMA를 "행동 결정기"로 붙이고, 실행( URLBERT / RAG / Chat )은 기존 로직 사용
+# 목적: GGUF(베이스) + GGUF-LoRA(행동결정)로 도구 선택만 로컬 LLaMA가 하고,
+#       실행( URLBERT / RAG / Chat )은 기존 파이프라인(Gemini/URLBERT/RAG)을 그대로 사용.
+
 import os
 import sys
 import re
 import warnings
-import torch  
+
 # 0) 환경/경고
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 warnings.filterwarnings("ignore", category=FutureWarning, module="huggingface_hub.file_download")
@@ -75,6 +77,7 @@ except Exception as e:
         func=lambda q: "RAG 툴 로드에 실패하여 문서 검색을 사용할 수 없습니다.",
         description="보안 문서 검색 (현재 비활성화됨)"
     )
+
 # 4) 상세 URL 설명 프롬프트(기존 유지)
 URL_PROMPT_TEMPLATE = """
 당신은 URL 보안 분석 전문가입니다. 사용자 질문과 함께 제공된 URL 분석 결과 및 세부 특징 데이터를 바탕으로,
@@ -102,27 +105,37 @@ url_prompt = PromptTemplate.from_template(URL_PROMPT_TEMPLATE)
 # 5) 메모리
 memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 
-# 6) 파인튜닝된 LLaMA 로드 
-from transformers import AutoTokenizer, AutoModelForCausalLM
-import torch, os
+# 6) llama-cpp 기반 "행동 결정기" 초기화 (GGUF + GGUF-LoRA)# 6) llama-cpp 기반 "행동 결정기" 초기화 (GGUF + GGUF-LoRA)
+from llama_cpp import Llama
 
-BASE_ID = "MLP-KTLim/llama-3-Korean-Bllossom-8B"
-LLM_DIR = os.environ.get("LLM_DIR", "models/bllossom_merged_fp16")
-
-# ✅ 베이스에서 Fast 토크나이저 사용 (tokenizer.json)
-tok = AutoTokenizer.from_pretrained(BASE_ID)  # use_fast=True (기본)
-if tok.pad_token is None:
-    tok.add_special_tokens({'pad_token': '[PAD]'})
-tok.padding_side = "left"
-
-device_map = {"": 0} if torch.cuda.is_available() else "cpu"
-llm_model = AutoModelForCausalLM.from_pretrained(
-    LLM_DIR,
-    torch_dtype=(torch.float16 if torch.cuda.is_available() else torch.float32),
-    device_map=device_map,
+# 기본 경로 (환경변수로 오버라이드 가능)
+LLM_GGUF = os.getenv(
+    "LLM_GGUF",
+    "/home/injeolmi/project/models/gguf/llama-3-Korean-Bllossom-8B-Q4_K_M.gguf"  # 베이스 GGUF
 )
-llm_model.resize_token_embeddings(len(tok))
-print(f"✅ Merged LLM loaded from: {LLM_DIR} (tokenizer from base: {BASE_ID}, fast)")
+LORA_GGUF = os.getenv(
+    "LORA_GGUF",
+    "/home/injeolmi/project/models/gguf/bllossom_agent_lora.gguf"                # 변환 완료된 LoRA GGUF
+)
+
+try:
+    llm_decider = Llama(
+        model_path=LLM_GGUF,          # 베이스 모델 GGUF
+        lora_path=LORA_GGUF,          # LoRA 어댑터 GGUF (convert_lora_to_gguf.py 결과물)
+        # 대부분의 빌드에선 lora_base 없이도 잘 적용됩니다.
+        # 혹시 런타임에 base path None 관련 메시지가 계속 뜨면 아래 주석을 해제해서 사용하세요.
+        # lora_base=LLM_GGUF,
+
+        n_ctx=4096,
+        n_threads=int(os.getenv("LLAMA_THREADS", "8")),
+        n_gpu_layers=0,               # GPU 안 쓸 경우 명시적으로 0
+        chat_format="llama-3",        # Llama-3 계열(Bllossom) 채팅 템플릿
+        verbose=True
+    )
+    print(f"✅ llama.cpp(결정기) loaded: base={LLM_GGUF}, lora={LORA_GGUF}")
+except Exception as e:
+    llm_decider = None
+    print(f"❌ llama.cpp 로드 실패: {e}  (규칙기반 폴백 사용)")
 
 
 # ─────────────────────────────────────────────────────────────────────────────────
@@ -145,50 +158,44 @@ def _first_url(text: str):
     return m.group(0) if m else None
 
 def decide_action_with_llm(user_query: str):
-    # 1) 프롬프트
-    prompt = [
-        {"role": "system", "content": "너는 보안 분석 챗봇이야. 질문에 맞춰 오직 다음 형식만 출력해.\nAction: <URLBERT_ThreatAnalyzer|SecurityDocsQA|Chat>\nAction Input: <텍스트>"},
-        {"role": "user", "content": user_query}
-    ]
-    # 2) 토크나이즈 (+ attention_mask 생성)
-    inputs = tok.apply_chat_template(prompt, return_tensors="pt", add_generation_prompt=True)
-    inputs = inputs.to(llm_model.device)
-
-    # 3) 생성(결정론+짧게)
-    gen = llm_model.generate(
-        inputs,
-        max_new_tokens=48,
-        do_sample=False, temperature=0.0, top_p=1.0,
-        repetition_penalty=1.2,
-        eos_token_id=tok.eos_token_id,
-        pad_token_id=tok.pad_token_id,
+    # 1) 시스템 지시: 오직 형식만 출력
+    sys_prompt = (
+        "너는 보안 분석 챗봇이야. 질문에 맞춰 오직 다음 형식만 출력해.\n"
+        "Action: <URLBERT_ThreatAnalyzer|SecurityDocsQA|Chat>\n"
+        "Action Input: <텍스트>"
     )
-    raw = tok.decode(gen[0][inputs.shape[-1]:], skip_special_tokens=True)
-    raw = _truncate_on_stops(raw)
 
-    # 4) 파싱
-    m = ACT_PAT.search(raw)
-    if m and m.group("act") in VALID_ACTIONS:
-        action = m.group("act").strip()
-        action_input = _truncate_on_stops(m.group("input").strip()).splitlines()[0].strip()
+    if llm_decider is not None:
+        out = llm_decider.create_chat_completion(
+            messages=[
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": user_query},
+            ],
+            temperature=0.0, top_p=1.0, repeat_penalty=1.2, max_tokens=64
+        )
+        raw = out["choices"][0]["message"]["content"]
+        raw = _truncate_on_stops(raw)
+        m = ACT_PAT.search(raw)
+        if m and m.group("act") in VALID_ACTIONS:
+            action = m.group("act").strip()
+            action_input = _truncate_on_stops(m.group("input").strip()).splitlines()[0].strip()
+            # URL 액션이면 입력 정리
+            if action == "URLBERT_ThreatAnalyzer":
+                url = _first_url(action_input) or _first_url(user_query)
+                action_input = url if url else user_query
+            return action, action_input, raw
+
+    # 2) 폴백(규칙 기반)
+    why_tokens = ["왜", "이유", "근거", "자세히", "어디가", "무엇 때문에", "설명"]
+    why = any(k in user_query for k in why_tokens)
+    url = _first_url(user_query)
+    if url:
+        action = "SecurityDocsQA" if why else "URLBERT_ThreatAnalyzer"
+        action_input = (f"{url} 위험 근거 설명" if why else url)
     else:
-        # 폴백: 규칙 기반
-        why_tokens = ["왜", "이유", "근거", "자세히", "어디가", "무엇 때문에", "설명"]
-        why = any(k in user_query for k in why_tokens)
-        url = _first_url(user_query)
-        if url:
-            action = "SecurityDocsQA" if why else "URLBERT_ThreatAnalyzer"
-            action_input = (f"{url} 위험 근거 설명" if why else url)
-        else:
-            action = "SecurityDocsQA"
-            action_input = user_query
-
-    # URL 액션이면 입력 정리
-    if action == "URLBERT_ThreatAnalyzer":
-        url = _first_url(action_input) or _first_url(user_query)
-        action_input = url if url else user_query
-
-    return action, action_input, raw  # raw는 디버그용
+        action = "SecurityDocsQA"
+        action_input = user_query
+    return action, action_input, "(fallback-rules)"
 
 # ─────────────────────────────────────────────────────────────────────────────────
 # 8) 보조 함수: URLBERT 결과에서 판정 추정
@@ -220,7 +227,7 @@ def get_chatbot_response(user_text: str) -> dict:
     elif action == "SecurityDocsQA":
         url_in_input = _first_url(action_input)
         if url_in_input:
-            # 상세 URL 분석(당신이 만든 설명 프롬프트 경로 사용)
+            # 상세 URL 분석(설명 프롬프트 사용)
             bert_result_text = url_tool.func(url_in_input)
             try:
                 raw_features_df = build_raw_features(url_in_input)
