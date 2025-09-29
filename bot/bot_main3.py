@@ -130,7 +130,7 @@ MEMORY_PROMPT_TEMPLATE = """
 """
 memory_prompt = PromptTemplate.from_template(MEMORY_PROMPT_TEMPLATE)
 
-# (추가) URLBERT 결과 텍스트에서 판정을 추정하는 헬퍼
+#  URLBERT 결과 텍스트에서 판정을 추정하는 헬퍼
 def _infer_verdict_from_text(bert_text: str) -> str:
     t = (bert_text or "").lower()
     bad_tokens = ["malicious", "phishing", "suspicious", "악성", "위험", "유해"]

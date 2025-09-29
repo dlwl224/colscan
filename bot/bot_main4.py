@@ -210,7 +210,7 @@ def _infer_verdict_from_text(bert_text: str) -> str:
     return "정상"
 
 # ─────────────────────────────────────────────────────────────────────────────────
-# 9) 최종 라우팅(핵심): LLaMA가 고른 Action을 실행
+# 9) 최종 라우팅: LLaMA가 고른 Action을 실행
 def get_chatbot_response(user_text: str) -> dict:
     text = user_text.strip()
 
