@@ -18,6 +18,7 @@ from langchain.memory import ConversationBufferMemory
 load_dotenv('api.env')
 
 # 프로젝트 경로 설정
+# 이 스크립트가 'bot' 폴더 안에 있다고 가정합니다.
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
@@ -37,6 +38,7 @@ llm = ChatGoogleGenerativeAI(
 )
 
 # 2) 툴 및 필요 함수 로드
+
 from bot.tools.urlbert_tool import load_urlbert_tool
 from bot.tools.rag_tools import load_rag_tool, build_rag_index_from_jsonl
 from urlbert.urlbert2.core.model_loader import GLOBAL_MODEL, GLOBAL_TOKENIZER
@@ -92,6 +94,26 @@ URL_PATTERN = re.compile(
 WHY_KEYWORDS = ["왜", "어디가", "뭐 때문에", "이유", "근거", "자세히", "어떤 점"]
 MEMORY_KEYWORDS = ["방금", "내가", "뭐였지", "기억해", "누구", "이름"]
 
+# 간단 URL 분석 결과 요약용 프롬프트
+SIMPLE_URL_PROMPT_TEMPLATE = """
+당신은 URL 분석 결과를 일반 사용자가 이해하기 쉽게 요약해주는 AI 비서입니다.
+아래의 기술적인 분석 결과를 바탕으로, 사용자에게 친절한 말투로 최종 결론을 알려주세요.
+
+[기술적 분석 결과]
+{bert_result}
+
+[답변 가이드]
+1. 분석 결과를 바탕으로 "안전", "위험", "주의" 등 명확한 결론을 내리고, 이모지(✅, ❌, ⚠️)와 함께 가장 먼저 보여주세요.
+2. 신뢰도(%) 정보를 강조해서 언급해주세요. (예: "99.99%의 신뢰도로 안전한 사이트로 확인되었어요.")
+3. 불필요한 헤더 정보나 기술적인 용어는 모두 제외하고, 최종 판정과 신뢰도만 간결하게 전달하세요.
+4. 사용자가 원하면 더 자세한 분석도 가능하다는 점을 안내해주세요. (예: "더 자세한 이유가 궁금하시면 '왜 안전해?'라고 물어보세요!")
+5. 전체 답변은 1~2문장의 짧고 친절한 한국어 대화체로 작성해주세요.
+
+[최종 요약 답변]
+"""
+simple_url_prompt = PromptTemplate.from_template(SIMPLE_URL_PROMPT_TEMPLATE)
+
+
 # 상세 URL 분석용 프롬프트
 URL_PROMPT_TEMPLATE = """
 당신은 URL 보안 분석 전문가입니다. 사용자 질문과 함께 제공된 URL 분석 결과 및 세부 특징 데이터를 바탕으로,
@@ -107,10 +129,21 @@ URL_PROMPT_TEMPLATE = """
 {feature_details}
 
 [답변 가이드]
-1. URL-BERT의 최종 판정(정상/악성)을 먼저 명확히 알려주세요.
-2. '세부 특징 데이터'를 근거로 들어 왜 그렇게 판단했는지 2~3가지 핵심 이유를 설명해주세요.
-3. 사용자가 어떻게 행동해야 할지 간단한 조치를 추천해주세요.
-4. 모든 답변은 한국어 대화체로 작성해주세요.
+1. **결론부터 명확하게**: URL-BERT의 최종 판정(예: "✅ 안전한 웹사이트입니다!")과 신뢰도를 한 문장으로 요약해서 가장 먼저 보여주세요.
+
+2. **핵심 요약 (Summary)**:
+   - 사용자가 긴 글을 읽지 않아도 되도록, 판단의 핵심 근거 1~2가지를 매우 간결하게 요약해주세요.
+   - (예: "SSL 인증서가 오랫동안 유지되고 있고, 외부 리소스 의존도가 낮아 안전성이 높습니다.")
+
+3. **상세 설명 (Details)**:
+   - 요약 아래에, '세부 특징 데이터'를 근거로 들어 왜 그렇게 판단했는지 2~3가지 핵심 이유를 구체적으로 설명해주세요.
+   - 각 이유를 번호를 붙여 명확하게 구분해주세요.
+
+4. **사용자 행동 요령**:
+   - 사용자가 어떻게 행동해야 할지 간단한 조치를 추천해주세요. (예: "안심하고 사용하셔도 좋습니다. 다만, 항상...")
+
+5. **작성 스타일**:
+   - 모든 답변은 일반 사용자가 이해하기 쉬운 한국어 대화체로 작성하고, 이모지를 적절히 사용해 가독성을 높여주세요.
 
 [최종 답변]
 """
@@ -139,8 +172,6 @@ def _infer_verdict_from_text(bert_text: str) -> str:
         return "악성"
     if any(tok in t for tok in good_tokens) and not any(tok in t for tok in bad_tokens):
         return "정상"
-    # 동시 등장/애매하면 보수적으로 악성으로 분류하거나, 기본 정상으로 둘 수도 있음
-    # 여기선 기본 '정상'으로
     return "정상"
 
 # 4) 챗봇 응답 생성 함수
@@ -162,15 +193,14 @@ def get_chatbot_response(query: str) -> dict:
     if match:
         url = match.group(1)
         
-        if is_why_question:  # 상세 분석 요청
-            bert_result_text = url_tool.func(url)
+        # URL-BERT의 기술적 결과를 먼저 받아옵니다.
+        bert_result_text = url_tool.func(url)
 
+        if is_why_question:  # 상세 분석 요청
             try:
                 raw_features_df = build_raw_features(url)
                 if not raw_features_df.empty:
-                    # URLBERT 판정 추정
                     verdict = _infer_verdict_from_text(bert_result_text)
-                    # Top-K 근거 요약
                     reasons = summarize_features_for_explanation(raw_features_df, verdict, top_k=3)
                     feature_details = "\n".join(f"- {r}" for r in reasons)
                 else:
@@ -186,9 +216,10 @@ def get_chatbot_response(query: str) -> dict:
             final_answer = llm.invoke(final_prompt).content
             return {"answer": final_answer, "mode": "url_analysis_detailed", "url": url}
         
-        else:  # 간단 분석 요청
-            bert_result_text = url_tool.func(url)
-            return {"answer": bert_result_text, "mode": "url_analysis_simple", "url": url}
+        else:  # 간단 분석 요청 시에도 LLM으로 사용자 친화적 답변 생성
+            final_prompt = simple_url_prompt.format(bert_result=bert_result_text)
+            final_answer = llm.invoke(final_prompt).content
+            return {"answer": final_answer, "mode": "url_analysis_simple", "url": url}
 
     # RAG(문서 검색) 시도
     rag_out = rag_tool.func(text)
@@ -209,7 +240,7 @@ def get_chatbot_response(query: str) -> dict:
     chat_answer = chat_tool.func(text)
     return {"answer": chat_answer, "mode": "chat"}
 
-# 5) 대화 루프 (테스트용)
+# 5) 대화 루프 
 if __name__ == '__main__':
     print("--- 챗봇 시작 (종료: '종료') ---")
     while True:
@@ -236,17 +267,15 @@ if __name__ == '__main__':
         elif mode == "chat":
             print("💬 [일반 Chat 응답]")
         elif mode == "url_analysis_detailed":
-            print("🔗 [URL 상세 분석]")
             if response.get("url"):
                 print(f"   대상: {response['url']}")
         elif mode == "url_analysis_simple":
-            print("🔗 [URL 간단 분석]")
             if response.get("url"):
                 print(f"   대상: {response['url']}")
         elif mode == "memory":
             print("🧠 [메모리 기반 응답]")
 
-        print(f"Bot ▶ Final Answer: {answer}")
+        print(f"Bot ▶ Final Answer: \n{answer}")
         
         if response.get("sources"):
             print("📚 [출처]")
