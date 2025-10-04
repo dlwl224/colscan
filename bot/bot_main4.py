@@ -1,6 +1,7 @@
 # bot_main4.py
 # 목적: GGUF(베이스) + GGUF-LoRA(행동결정)로 도구 선택만 로컬 LLaMA가 하고,
-#       실행( URLBERT / RAG / Chat )은 기존 파이프라인(Gemini/URLBERT/RAG)을 그대로 사용.
+#      실행( URLBERT / RAG / Chat )은 기존 파이프라인(Gemini/URLBERT/RAG)을 그대로 사용.
+#      + 모델의 잘못된 판단을 보정하는 안전장치(Sanity Check) 추가
 
 import os
 import sys
@@ -40,8 +41,12 @@ if "GOOGLE_API_KEY" not in os.environ:
 gemini = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.01)
 
 def chat_fn(query: str) -> str:
-    raw = gemini.invoke(query).content
-    return raw.strip()
+    try:
+        raw = gemini.invoke(query).content
+        return raw.strip()
+    except Exception as e:
+        print(f"Gemini API 호출 오류: {e}")
+        return "죄송합니다, 답변을 생성하는 중에 문제가 발생했어요."
 
 chat_tool = Tool(
     name="Chat",
@@ -54,7 +59,7 @@ try:
     url_tool = load_urlbert_tool(GLOBAL_MODEL, GLOBAL_TOKENIZER)
 except Exception as e:
     url_tool = Tool(
-        name="URLBERT_ThreatAnalyzer",
+        name="URL_Analyzer",
         func=lambda x, _e=str(e): f"URL 분석 툴 로드 중 오류 발생: {_e}",
         description="URL 안전/위험 판단"
     )
@@ -73,7 +78,7 @@ try:
 except Exception as e:
     print(f"❌ RAG 툴 로드 중 오류 발생: {e}")
     rag_tool = Tool(
-        name="SecurityDocsQA",
+        name="RAG",
         func=lambda q: "RAG 툴 로드에 실패하여 문서 검색을 사용할 수 없습니다.",
         description="보안 문서 검색 (현재 비활성화됨)"
     )
@@ -105,31 +110,26 @@ url_prompt = PromptTemplate.from_template(URL_PROMPT_TEMPLATE)
 # 5) 메모리
 memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 
-# 6) llama-cpp 기반 "행동 결정기" 초기화 (GGUF + GGUF-LoRA)# 6) llama-cpp 기반 "행동 결정기" 초기화 (GGUF + GGUF-LoRA)
+# 6) llama-cpp 기반 "행동 결정기" 초기화 (GGUF + GGUF-LoRA)
 from llama_cpp import Llama
 
-# 기본 경로 (환경변수로 오버라이드 가능)
 LLM_GGUF = os.getenv(
     "LLM_GGUF",
-    "/home/injeolmi/project/models/gguf/llama-3-Korean-Bllossom-8B-Q4_K_M.gguf"  # 베이스 GGUF
+    "/home/injeolmi/project/models/gguf/llama-3-Korean-Bllossom-8B-Q4_K_M.gguf"
 )
 LORA_GGUF = os.getenv(
     "LORA_GGUF",
-    "/home/injeolmi/project/models/gguf/bllossom_agent_lora.gguf"                # 변환 완료된 LoRA GGUF
+    "/home/injeolmi/project/models/gguf/bllossom_agent_lora3.gguf"
 )
 
 try:
     llm_decider = Llama(
-        model_path=LLM_GGUF,          # 베이스 모델 GGUF
-        lora_path=LORA_GGUF,          # LoRA 어댑터 GGUF (convert_lora_to_gguf.py 결과물)
-        # 대부분의 빌드에선 lora_base 없이도 잘 적용됩니다.
-        # 혹시 런타임에 base path None 관련 메시지가 계속 뜨면 아래 주석을 해제해서 사용하세요.
-        # lora_base=LLM_GGUF,
-
+        model_path=LLM_GGUF,
+        lora_path=LORA_GGUF,
         n_ctx=4096,
         n_threads=int(os.getenv("LLAMA_THREADS", "8")),
-        n_gpu_layers=0,               # GPU 안 쓸 경우 명시적으로 0
-        chat_format="llama-3",        # Llama-3 계열(Bllossom) 채팅 템플릿
+        n_gpu_layers=0,
+        chat_format="llama-3",
         verbose=True
     )
     print(f"✅ llama.cpp(결정기) loaded: base={LLM_GGUF}, lora={LORA_GGUF}")
@@ -139,11 +139,12 @@ except Exception as e:
 
 
 # ─────────────────────────────────────────────────────────────────────────────────
-# 7) 행동 결정 유틸(반복/환각 방지 포함)
+# 7) 행동 결정 유틸
 STOP_WORDS = ["\n\n", "\nAction Result", "\nAction Logic", "\nAction Reference", "assistant\n", "assistant"]
-VALID_ACTIONS = {"URLBERT_ThreatAnalyzer", "SecurityDocsQA", "Chat"}
+VALID_ACTIONS = {"URL_SIMPLE", "URL_DETAILED", "RAG", "CHAT"}
 ACT_PAT = re.compile(r"Action:\s*(?P<act>[A-Za-z_]+)\s*\nAction Input:\s*(?P<input>.+)", re.S)
-URL_PAT = re.compile(r'(https?://\S+|(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\S*)', re.I)
+URL_PAT = re.compile(r'(https?://\S+|(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\S*)', re.I)
+
 
 def _truncate_on_stops(s: str) -> str:
     cut = len(s)
@@ -158,47 +159,49 @@ def _first_url(text: str):
     return m.group(0) if m else None
 
 def decide_action_with_llm(user_query: str):
-    # 1) 시스템 지시: 오직 형식만 출력
     sys_prompt = (
         "너는 보안 분석 챗봇이야. 질문에 맞춰 오직 다음 형식만 출력해.\n"
-        "Action: <URLBERT_ThreatAnalyzer|SecurityDocsQA|Chat>\n"
+        "Action: <URL_SIMPLE|URL_DETAILED|RAG|CHAT>\n"
         "Action Input: <텍스트>"
     )
 
     if llm_decider is not None:
-        out = llm_decider.create_chat_completion(
-            messages=[
-                {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": user_query},
-            ],
-            temperature=0.0, top_p=1.0, repeat_penalty=1.2, max_tokens=64
-        )
-        raw = out["choices"][0]["message"]["content"]
-        raw = _truncate_on_stops(raw)
-        m = ACT_PAT.search(raw)
-        if m and m.group("act") in VALID_ACTIONS:
-            action = m.group("act").strip()
-            action_input = _truncate_on_stops(m.group("input").strip()).splitlines()[0].strip()
-            # URL 액션이면 입력 정리
-            if action == "URLBERT_ThreatAnalyzer":
-                url = _first_url(action_input) or _first_url(user_query)
-                action_input = url if url else user_query
-            return action, action_input, raw
+        try:
+            out = llm_decider.create_chat_completion(
+                messages=[
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user_query},
+                ],
+                temperature=0.0, top_p=1.0, repeat_penalty=1.2, max_tokens=128
+            )
+            raw = out["choices"][0]["message"]["content"]
+            raw = _truncate_on_stops(raw)
+            m = ACT_PAT.search(raw)
+            if m and m.group("act") in VALID_ACTIONS:
+                action = m.group("act").strip()
+                action_input = _truncate_on_stops(m.group("input").strip()).splitlines()[0].strip()
+                
+                if action in ["URL_SIMPLE", "URL_DETAILED"]:
+                    url = _first_url(action_input) or _first_url(user_query)
+                    action_input = url if url else user_query
+                return action, action_input, raw
+        except Exception as e:
+            print(f"LLM 결정 중 오류 발생: {e}. 규칙 기반으로 폴백합니다.")
 
-    # 2) 폴백(규칙 기반)
-    why_tokens = ["왜", "이유", "근거", "자세히", "어디가", "무엇 때문에", "설명"]
-    why = any(k in user_query for k in why_tokens)
+    why_tokens = ["왜", "이유", "근거", "자세히", "설명", "어떤 점", "특징", "원리", "파헤쳐줘", "기술적으로"]
     url = _first_url(user_query)
     if url:
-        action = "SecurityDocsQA" if why else "URLBERT_ThreatAnalyzer"
-        action_input = (f"{url} 위험 근거 설명" if why else url)
+        action = "URL_DETAILED" if any(k in user_query for k in why_tokens) else "URL_SIMPLE"
+        action_input = url
     else:
-        action = "SecurityDocsQA"
+        chat_starters = ["안녕", "하이", "ㅎㅇ", "고마워", "감사", "수고", "요즘", "뭐해", "ㅋㅋㅋ", "배고프다"]
+        action = "CHAT" if any(starter in user_query for starter in chat_starters) else "RAG"
         action_input = user_query
+        
     return action, action_input, "(fallback-rules)"
 
 # ─────────────────────────────────────────────────────────────────────────────────
-# 8) 보조 함수: URLBERT 결과에서 판정 추정
+# 8) 보조 함수
 def _infer_verdict_from_text(bert_text: str) -> str:
     t = (bert_text or "").lower()
     bad = ["malicious", "phishing", "suspicious", "악성", "위험", "유해"]
@@ -210,60 +213,72 @@ def _infer_verdict_from_text(bert_text: str) -> str:
     return "정상"
 
 # ─────────────────────────────────────────────────────────────────────────────────
-# 9) 최종 라우팅: LLaMA가 고른 Action을 실행
+# 9) 최종 라우팅
 def get_chatbot_response(user_text: str) -> dict:
     text = user_text.strip()
 
     # ① LLaMA에게 도구 선택을 맡긴다
     action, action_input, raw_llm = decide_action_with_llm(text)
+    
+    url_in_text = _first_url(text)
+    if action in ["URL_SIMPLE", "URL_DETAILED"] and not url_in_text:
+        print(f"⚠️ 모델이 URL 없는 질문에 '{action}'을 선택하여 'RAG'로 강제 조정합니다.")
+        action = "RAG"
+        action_input = text
 
-    # ② 실행 분기
-    if action == "URLBERT_ThreatAnalyzer":
-        # 간단 URL 분석
-        bert_result_text = url_tool.func(action_input)
-        return {"answer": bert_result_text, "mode": "url_analysis_simple", "url": action_input,
-                "action": action, "action_input": action_input, "raw_llm": raw_llm}
+    response_data = {
+        "action": action, 
+        "action_input": action_input, 
+        "raw_llm": raw_llm
+    }
 
-    elif action == "SecurityDocsQA":
-        url_in_input = _first_url(action_input)
-        if url_in_input:
-            # 상세 URL 분석(설명 프롬프트 사용)
-            bert_result_text = url_tool.func(url_in_input)
-            try:
-                raw_features_df = build_raw_features(url_in_input)
-                if not raw_features_df.empty:
-                    verdict = _infer_verdict_from_text(bert_result_text)
-                    reasons = summarize_features_for_explanation(raw_features_df, verdict, top_k=3)
-                    feature_details = "\n".join(f"- {r}" for r in reasons) if reasons else "세부 특징을 추출하지 못했습니다."
-                else:
-                    feature_details = "세부 특징을 추출하지 못했습니다."
-            except Exception as e:
-                feature_details = f"세부 특징 추출 중 오류 발생: {e}"
+    # ② 실행 분기 (오류 발생 시 안전하게 처리하기 위해 try-except로 감쌈)
+    try:
+        if action == "URL_SIMPLE":
+            bert_result_text = url_tool.func(action_input)
+            response_data.update({"answer": bert_result_text, "mode": "url_analysis_simple", "url": action_input})
+
+        elif action == "URL_DETAILED":
+            bert_result_text = url_tool.func(action_input)
+            raw_features_df = build_raw_features(action_input)
+            
+            if not raw_features_df.empty:
+                verdict = _infer_verdict_from_text(bert_result_text)
+                reasons = summarize_features_for_explanation(raw_features_df, verdict, top_k=3)
+                feature_details = "\n".join(f"- {r}" for r in reasons) if reasons else "세부 특징을 추출하지 못했습니다."
+            else:
+                feature_details = "세부 특징을 추출하지 못했습니다."
 
             final_prompt = url_prompt.format(
                 user_query=text,
                 bert_result=bert_result_text,
                 feature_details=feature_details
             )
-            final_answer = chat_tool.func(final_prompt)  # Gemini로 자연어 설명 생성
-            return {"answer": final_answer, "mode": "url_analysis_detailed", "url": url_in_input,
-                    "action": action, "action_input": action_input, "raw_llm": raw_llm}
-        else:
-            # 일반 보안 지식/문서 검색
-            rag_out = rag_tool.func(text)
-            rag_answer = rag_out.get("answer", "")
-            sources = rag_out.get("sources", [])
-            return {"answer": rag_answer, "mode": "rag", "sources": sources[:5],
-                    "action": action, "action_input": action_input, "raw_llm": raw_llm}
+            final_answer = chat_tool.func(final_prompt)
+            response_data.update({"answer": final_answer, "mode": "url_analysis_detailed", "url": action_input})
 
-    else:
-        # Chat
-        chat_answer = chat_tool.func(text)
-        return {"answer": chat_answer, "mode": "chat",
-                "action": action, "action_input": action_input, "raw_llm": raw_llm}
+        elif action == "RAG":
+            rag_out = rag_tool.func(action_input)
+            rag_answer = rag_out.get("answer", "죄송합니다, 관련 정보를 찾을 수 없습니다.")
+            sources = rag_out.get("sources", [])
+            response_data.update({"answer": rag_answer, "mode": "rag", "sources": sources[:5]})
+
+        elif action == "CHAT":
+            chat_answer = chat_tool.func(action_input)
+            response_data.update({"answer": chat_answer, "mode": "chat"})
+        
+        else: # 예외적인 Action 결정 시
+            chat_answer = chat_tool.func(text)
+            response_data.update({"answer": chat_answer, "mode": "chat", "action": "CHAT (Fallback)"})
+
+    except Exception as e:
+        print(f"🚨 [ERROR] Action '{action}' 실행 중 오류: {e}")
+        response_data.update({"answer": "요청을 처리하는 중 오류가 발생했어요. 다른 방식으로 질문해주시겠어요?", "mode": "error"})
+
+    return response_data
 
 # ─────────────────────────────────────────────────────────────────────────────────
-# 10) 인터랙티브 루프(테스트)
+# 10) 인터랙티브 루프
 if __name__ == '__main__':
     print("--- 챗봇 시작 (종료: '종료') ---")
     while True:
@@ -278,11 +293,15 @@ if __name__ == '__main__':
             continue
 
         response = get_chatbot_response(text)
-
+        
+        print(f"--- [Debug Info] ---")
+        print(f"Action: {response.get('action')}")
+        print(f"Action Input: {response.get('action_input')}")
+        print(f"--------------------")
+        
         answer = response.get("answer")
         mode = response.get("mode")
 
-        # 메모리 기록
         memory.save_context({"input": text}, {"output": answer})
 
         if mode == "rag":
@@ -290,20 +309,17 @@ if __name__ == '__main__':
         elif mode == "chat":
             print("💬 [일반 Chat 응답]")
         elif mode == "url_analysis_detailed":
-            print("🔗 [URL 상세 분석]")
             if response.get("url"):
                 print(f"   대상: {response['url']}")
         elif mode == "url_analysis_simple":
-            print("🔗 [URL 간단 분석]")
             if response.get("url"):
                 print(f"   대상: {response['url']}")
 
-        print(f"Bot ▶ Final Answer: {answer}")
+        print(f"Bot ▶ {answer}")
 
         if response.get("sources"):
             print("📚 [출처]")
             for s in response["sources"]:
                 print(" -", s)
-
-        # 디버깅 원하면 주석 해제
-        # print("[LLM raw]\n", response.get("raw_llm"))
+        
+        print("\n")
