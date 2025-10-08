@@ -77,7 +77,7 @@ class UrlBertDAO:
         url = (url or "").strip()
         conn = get_connection()
         try:
-            with conn.cursor() as cursor:
+            with conn.cursor(dictionary=True) as cursor:
                 sql = """
                 INSERT INTO urlbert_analysis (url, url_hash, header_info, is_malicious, confidence, true_label, analysis_date)
                 VALUES (%s, MD5(%s), %s, %s, %s, %s, NOW())
@@ -88,6 +88,43 @@ class UrlBertDAO:
                   true_label = VALUES(true_label),
                   analysis_date = NOW()
                 """
+                cursor.execute(sql, (url, url, header_info, is_malicious, confidence, true_label))
+                conn.commit()
+                return cursor.rowcount
+        finally:
+            conn.close()
+
+    @staticmethod
+    def upsert_board(
+        url: str,
+        true_label: int, # 1: 악성(MALICITATE), 0: 정상(LEGITIMATE)
+        confidence: Optional[float] = None,
+        header_info: Optional[str] = None # url_report에서 가져온 신고 시점의 헤더 정보
+    ) -> int:
+        """
+        [NEW] 관리자가 최종 판단(악성/정상)을 내렸을 때만 urlbert_analysis에 반영하는 함수.
+        """
+        if true_label not in (0, 1):
+            raise ValueError("true_label must be 0 (LEGITIMATE) or 1 (MALICIOUS)")
+             
+        url = (url or "").strip()
+        is_malicious = true_label # 악성이면 1, 정상이면 0
+        
+        conn = get_connection()
+        try:
+            with conn.cursor() as cursor:
+                sql = """
+                INSERT INTO urlbert_analysis (url, url_hash, header_info, is_malicious, confidence, true_label, analysis_date)
+                VALUES (%s, MD5(%s), %s, %s, %s, %s, NOW())
+                ON DUPLICATE KEY UPDATE
+                  # 악성 여부, 신뢰도, 확정 레이블, 업데이트 날짜만 갱신
+                  is_malicious = VALUES(is_malicious),
+                  confidence = VALUES(confidence),
+                  true_label = VALUES(true_label),
+                  analysis_date = NOW()
+                  /* 신고 시점의 header_info는 업데이트하지 않습니다. */
+                """
+                # header_info는 INSERT 시에만 사용됩니다.
                 cursor.execute(sql, (url, url, header_info, is_malicious, confidence, true_label))
                 conn.commit()
                 return cursor.rowcount

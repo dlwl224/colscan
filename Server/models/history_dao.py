@@ -1,10 +1,68 @@
 # Server/models/history_dao.py
+from typing import Tuple
 from Server.DB_conn import get_connection
 
 class HistoryDAO:
 
     GUEST_LIMIT = 5  # ✅ 비회원 최대 5개
 
+    # ========= 오늘/어제 카운트 =========
+    @staticmethod
+    def get_today_yesterday_counts(user_id: str) -> Tuple[int, int]:
+        """
+        DB 서버 시간(현재 KST, time_zone=SYSTEM)을 기준으로 '오늘/어제' 집계.
+        - 오늘: [CURDATE(), CURDATE()+1)
+        - 어제: [CURDATE()-1, CURDATE())
+        """
+        sql = """
+            SELECT
+              SUM(scanned_at >= CURDATE() AND scanned_at < (CURDATE() + INTERVAL 1 DAY)) AS today_cnt,
+              SUM(scanned_at >= (CURDATE() - INTERVAL 1 DAY) AND scanned_at < CURDATE()) AS yday_cnt
+            FROM History
+            WHERE user_id = %s
+        """
+        conn = get_connection()
+        try:
+            with conn.cursor() as c:
+                c.execute(sql, (user_id,))
+                row = c.fetchone()
+                if not row:
+                    return 0, 0
+                # DictCursor 또는 tuple 모두 대응
+                if isinstance(row, dict):
+                    return int(row.get("today_cnt") or 0), int(row.get("yday_cnt") or 0)
+                return int(row[0] or 0), int(row[1] or 0)
+        finally:
+            try: conn.close()
+            except: pass
+
+    @staticmethod
+    def get_history_summary(user_id: str):
+        """
+        해당 사용자/게스트의 전체, 정상, 악성 히스토리 개수를 집계합니다.
+        결과: {'total': int, 'legit': int, 'malicious': int}
+        """
+        sql = """
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN result_label = 'LEGITIMATE' THEN 1 ELSE 0 END) AS legit,
+                SUM(CASE WHEN result_label = 'MALICIOUS' THEN 1 ELSE 0 END) AS malicious
+            FROM History
+            WHERE user_id = %s
+        """
+        conn = get_connection()
+        try:
+            # DictCursor를 가정하고 row.items()를 사용합니다.
+            with conn.cursor() as c: 
+                c.execute(sql, (user_id,))
+                row = c.fetchone()
+                if not row:
+                    return {'total': 0, 'legit': 0, 'malicious': 0}
+                return {k: int(v or 0) for k, v in row.items()}
+        finally:
+            try: conn.close()
+            except: pass
+            
     @staticmethod
     def can_guest_save_more(guest_id: str) -> bool:
         """게스트가 더 저장 가능(5개 미만)인지"""

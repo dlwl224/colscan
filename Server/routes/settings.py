@@ -1,19 +1,6 @@
-# from flask import Blueprint, render_template, request, jsonify
-
-# settings_bp = Blueprint("settings", __name__)
-
-# @settings_bp.route("/", methods=["GET"])
-# def settings_page():
-#     return render_template("settings.html")
-
-# @settings_bp.route("/", methods=["POST"])
-# def update_settings():
-#     # 실제 설정 저장 로직 추가 가능
-#     settings_data = request.json
-#     return jsonify({"message": "설정이 저장되었습니다.", "data": settings_data}), 200
-
 # routes/settings.py
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
+from Server.models.history_dao import HistoryDAO
 
 settings_bp = Blueprint("settings", __name__, url_prefix="/settings")
 
@@ -116,3 +103,15 @@ def go_history_with_filter():
 def settings_json():
     return jsonify({"ok": True, "settings": get_settings()}), 200
 
+@settings_bp.route("/history/summary", methods=["GET"])
+def get_history_summary_api():
+    """RN 마이페이지에서 사용할 히스토리 요약 통계"""
+    # 게스트 ID를 세션에서 가져오는 로직은 보통 auth 라우트에서 처리되지만, 
+    # 여기서는 history_dao에서 사용하는 ID를 가져옵니다.
+    user_id = session.get("user_id") or session.get("guest_id")
+    if not user_id:
+        # 로그인/게스트 ID가 없으면 0으로 반환
+        return jsonify({"total": 0, "legit": 0, "malicious": 0}), 200
+
+    summary = HistoryDAO.get_history_summary(user_id)
+    return jsonify(summary), 200
