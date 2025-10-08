@@ -131,6 +131,38 @@ def reset_password():
 
     # 3. 새 비밀번호 유효성 검사 (회원가입 규칙과 동일)
     # 최소 8자, 대문자, 숫자, 특수문자(!#%^*) 포함
+    # pw_pattern = r"^(?=.*[A-Z])(?=.*\d)(?=.*[!#%\^*])[A-Za-z\d!#%\^*]{8,}$"
+    # if not re.match(pw_pattern, new_password):
+    #     return jsonify({
+    #         "success": False, 
+    #         "error": "새 비밀번호는 8자 이상이며, 대문자, 숫자, 특수문자(!#%^*)를 포함해야 합니다."
+    #     }), 400
+
+    # try:
+    #     # 4. 비밀번호 재설정 및 저장
+    #     hashed_pw = generate_password_hash(new_password)
+        
+    #     # UserDAO.update_password 메서드 (UserDAO에 추가됨) 사용
+    #     UserDAO.update_password(user["id"], hashed_pw)
+
+    #     # 1. ✅ 여기에 비밀번호 재설정 성공 로그를 추가합니다.
+    #     print(f"[SUCCESS] Password reset for user: {email} (ID: {user['id']})") 
+        
+    #     # 5. 성공 응답
+    #     return jsonify({"success": True}), 200
+
+    # except Exception as e:
+    #     # 데이터베이스 작업 중 발생할 수 있는 오류 처리
+    #     print(f"[ERROR] Password reset failed for user_id={user['id']}: {e}")
+    #     return jsonify({"success": False, "error": "서버 오류로 인해 비밀번호 재설정에 실패했습니다."}), 500
+
+    # 기존 비밀번호와 동일한지 체크
+    hashed_pw_record = UserDAO.find_hashed_password_by_id(user["id"])
+    current_hashed_pw = hashed_pw_record.get("password")
+    if current_hashed_pw and check_password_hash(current_hashed_pw, new_password):
+        return jsonify({"success": False, "error": "기존 비밀번호와 동일합니다. 다른 비밀번호를 사용해주세요."}), 400
+
+    # 비밀번호 규칙 체크
     pw_pattern = r"^(?=.*[A-Z])(?=.*\d)(?=.*[!#%\^*])[A-Za-z\d!#%\^*]{8,}$"
     if not re.match(pw_pattern, new_password):
         return jsonify({
@@ -139,20 +171,13 @@ def reset_password():
         }), 400
 
     try:
-        # 4. 비밀번호 재설정 및 저장
+        # 비밀번호 해시 후 저장
         hashed_pw = generate_password_hash(new_password)
-        
-        # UserDAO.update_password 메서드 (UserDAO에 추가됨) 사용
         UserDAO.update_password(user["id"], hashed_pw)
-
-        # 1. ✅ 여기에 비밀번호 재설정 성공 로그를 추가합니다.
         print(f"[SUCCESS] Password reset for user: {email} (ID: {user['id']})") 
-        
-        # 5. 성공 응답
         return jsonify({"success": True}), 200
 
     except Exception as e:
-        # 데이터베이스 작업 중 발생할 수 있는 오류 처리
         print(f"[ERROR] Password reset failed for user_id={user['id']}: {e}")
         return jsonify({"success": False, "error": "서버 오류로 인해 비밀번호 재설정에 실패했습니다."}), 500
 
@@ -279,37 +304,21 @@ def update_nickname():
     
 @auth_bp.route("/check-password-same", methods=["POST"])
 def check_password_same():
-    # 현재 로그인된 사용자의 ID를 가져옵니다.
-    user_id = session.get("user_id")
-    if not user_id:
-        # 비로그인 상태는 비밀번호 변경 대상이 아니므로 안전하게 False 반환
-        return jsonify({"success": True, "is_same": False}), 200 
-
     data = request.get_json(silent=True)
+    email = data.get("email")
+    nickname = data.get("nickname")
     new_password = data.get("password")
 
-    if not new_password:
-        return jsonify({"success": True, "is_same": False}), 200
+    # 이메일+닉네임로 사용자 조회
+    user = UserDAO.find_by_email_and_nickname(email.strip(), nickname.strip())
+    if not user:
+        return jsonify({"success": False, "is_same": False}), 200
 
-    try:
-        # UserDAO를 통해 현재 사용자의 해시된 비밀번호를 조회합니다.
-        # find_hashed_password_by_id 메서드는 아래 UserDAO에 추가합니다.
-        hashed_pw_record = UserDAO.find_hashed_password_by_id(user_id) 
-
-        if not hashed_pw_record or not hashed_pw_record.get('password'):
-            # 사용자는 로그인되어 있으나 DB에 비밀번호가 없는 경우 (매우 드물지만)
-            return jsonify({"success": False, "error": "사용자 비밀번호 정보를 찾을 수 없습니다."}), 404
-
-        current_hashed_pw = hashed_pw_record.get('password')
-
-        # werkzeug.security의 check_password_hash를 사용하여 비교합니다.
+    hashed_pw_record = UserDAO.find_hashed_password_by_id(user["id"])
+    current_hashed_pw = hashed_pw_record.get("password")
+    
+    is_same = False
+    if current_hashed_pw:
         is_same = check_password_hash(current_hashed_pw, new_password)
 
-        return jsonify({
-            "success": True,
-            "is_same": is_same
-        }), 200
-
-    except Exception as e:
-        print(f"[ERROR] Failed to check password same for user {user_id}: {e}")
-        return jsonify({"success": False, "error": "서버 오류"}), 500
+    return jsonify({"success": True, "is_same": is_same}), 200
