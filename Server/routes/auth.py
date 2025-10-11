@@ -5,7 +5,14 @@ from Server.models.history_dao import HistoryDAO
 from werkzeug.security import generate_password_hash, check_password_hash
 from urllib.parse import urlparse, urljoin
 import re
-from datetime import datetime, date # (register_proc에서도 사용됨)
+from datetime import datetime, date 
+
+try:
+    from pymysql.err import IntegrityError
+except ImportError:
+    # 사용하는 DB 라이브러리가 다를 경우를 대비한 안전 장치입니다.
+    class IntegrityError(Exception):
+        pass
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 
@@ -42,9 +49,11 @@ def login_proc():
             except Exception as e:
                 print(f"[WARN] migrate guest->user fail: guest={prev_guest_id}, user={user['id']}, err={e}")
 
-        return redirect(redirect_to if _is_safe_url(redirect_to) else "/settings", code=303)
+        #return redirect(redirect_to if _is_safe_url(redirect_to) else "/settings", code=303)
+        return jsonify({"success": True}), 200 # 성공
 
-    return redirect(url_for("auth.login_page") + "?error=true", code=303)
+    #return redirect(url_for("auth.login_page") + "?error=true", code=303)
+    return jsonify({"success": False, "error": "로그인 정보가 일치하지 않습니다."}), 401
 
 @auth_bp.route("/logout")
 def logout():
@@ -70,8 +79,6 @@ def register_page():
 
 @auth_bp.route("/registerProc", methods=["POST"])
 def register_proc():
-    from datetime import datetime
-    import re
 
     data = request.form
     password = data.get("password")
@@ -88,14 +95,41 @@ def register_proc():
     hashed_pw = generate_password_hash(password)
     birth_date = datetime.strptime(data["birthDate"], "%Y-%m-%d")
 
-    UserDAO.create_user(
-        email=data["email"],
-        password=hashed_pw,
-        nickname=data["nickname"],
-        birth_date=birth_date,
-        gender=data["gender"]
-    )
-    return redirect("/auth/login")
+    # UserDAO.create_user(
+    #     email=data["email"],
+    #     password=hashed_pw,
+    #     nickname=data["nickname"],
+    #     birth_date=birth_date,
+    #     gender=data["gender"]
+    # )
+    # return redirect("/auth/login")
+    try:
+        UserDAO.create_user(
+            email=data["email"],
+            password=hashed_pw,
+            nickname=data["nickname"],
+            birth_date=birth_date,
+            gender=data["gender"]
+        )
+        return redirect("/auth/login")
+    except IntegrityError as e:
+        # 💡 (1062, "Duplicate entry ...") 에러는 여기서 잡음
+        if "Duplicate entry" in str(e) and "email" in str(e):
+            return jsonify({
+                "success": False,
+                "error": "이미 사용 중인 이메일입니다."
+            }), 409 # Conflict (충돌) 에러 코드 사용
+        # 다른 IntegrityError(예: UNIQUE key 위반 등)는 일반적인 오류로 처리
+        return jsonify({
+            "success": False,
+            "error": "데이터베이스 오류가 발생했습니다."
+        }), 500
+    except Exception as e:
+        # 기타 다른 오류
+        return jsonify({
+            "success": False,
+            "error": f"서버 오류가 발생했습니다: {e}"
+        }), 500
 
 @auth_bp.route("/check-email")
 def check_email():

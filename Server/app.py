@@ -1,4 +1,4 @@
-from flask import Flask, request, session
+from flask import Flask, request, session, current_app
 from flask_cors import CORS
 import uuid 
 from datetime import timedelta 

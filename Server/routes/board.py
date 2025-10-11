@@ -1,5 +1,5 @@
 # routes/board.py
-from flask import Blueprint, request, jsonify, session
+from flask import Blueprint, request, jsonify, session, current_app
 from Server.models.board_dao import BoardDAO
 from Server.models.user_dao import UserDAO
 from Server.models.urlbert_dao import UrlBertDAO # UrlBertDAO 임포트 (3-2-1용)

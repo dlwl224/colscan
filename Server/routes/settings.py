@@ -91,13 +91,6 @@ def update_settings():
 
     return jsonify({"ok": True, "settings": cur}), 200
 
-# (선택) 히스토리 페이지로 이동하는 헬퍼 라우트
-@settings_bp.route("/go-history")
-def go_history_with_filter():
-    filt = request.args.get("filter", get_settings()["history"]["default_filter"])
-    # /history?filter=xxx 로 리디렉트 (뷰에서 파라미터 읽어 필터 적용)
-    return redirect(url_for("history.history") + f"?filter={filt}")
-
 # JSON으로 현재 설정 반환 (RN 용)
 @settings_bp.route("/json", methods=["GET"])
 def settings_json():
