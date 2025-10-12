@@ -175,143 +175,119 @@ def format_history_for_langchain(chat_history: Optional[Any]) -> list:
             
     return formatted_history
 # 12) 핵심 함수
-def get_chatbot_response(query: str, chat_history: Optional[Any]=None, session_id: Optional[str]=None) -> Dict[str, Any]:
-    text = (query or "").strip()
-    if not text: return {"answer": "", "mode": "empty"}
+# bot_main5.py의 get_chatbot_response 함수를 아래 코드로 전체 교체해주세요.
 
-    # Redis 세션
+def get_chatbot_response(query: str, session_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    사용자 쿼리를 처리하고, Redis를 이용해 대화 기록을 관리하여 응답을 반환합니다.
+    """
+    text = (query or "").strip()
+    if not text:
+        return {"answer": "", "mode": "empty"}
+
+    # --- 1. (LOAD) 대화 시작 시 Redis에서 이전 기록 불러오기 ---
     if session_id and REDIS_AVAILABLE:
-        try: touch_session(session_id)
-        except Exception: pass
+        try:
+            touch_session(session_id)
+            chat_history = get_history(session_id)
+        except Exception as e:
+            log.error(f"Redis에서 기록을 불러오는 중 오류 발생: {e}")
+            chat_history = []
+    else:
+        chat_history = []
 
     history_text = history_to_text(chat_history)
     match = URL_PATTERN.search(text)
     is_why_question = any(k in text for k in WHY_KEYWORDS)
     is_memory_question = any(k in text for k in MEMORY_KEYWORDS)
 
-    # 1) 메모리 질문
+    response = {}
+
+    # --- 2. (PROCESS) 기존 로직을 사용하여 응답 생성 ---
+    # 1) 메모리 질문 처리
     if is_memory_question and chat_history:
         memory_prompt = f"당신은 사용자와의 대화를 기억하는 친절한 챗봇입니다.\n\n[대화 기록]\n{history_text}\n\n[질문]\n{text}\n\n[최종 답변]:"
-        try: ans = llm.invoke(memory_prompt).content
-        except Exception: ans = "메모리 조회 중 오류 발생"
-        return {"answer": ans, "mode":"memory"}
+        try:
+            ans = llm.invoke(memory_prompt).content
+            response = {"answer": ans, "mode": "memory"}
+        except Exception as e:
+            log.error(f"메모리 질문 처리 중 LLM 호출 오류: {e}")
+            response = {"answer": "기억을 떠올리는 중 오류가 발생했어요.", "mode": "memory_error"}
 
-    # 2) URL 분석
-    if match:
+    # 2) URL 분석 처리
+    elif match:
+        # (이전 답변과 동일, 변경 없음)
         url = match.group(1)
-        try: bert_result = url_tool.func(url)
-        except Exception as e: bert_result = f"URL-BERT 오류: {e}"
+        try:
+            bert_result = url_tool.func(url)
+        except Exception as e:
+            bert_result = f"URL-BERT 오류: {e}"
 
         if is_why_question:
+            # ... 상세 분석 로직 ...
             try:
                 df = build_raw_features(url)
                 verdict = _infer_verdict_from_text(bert_result)
                 reasons = summarize_features_for_explanation(df, verdict, top_k=3) if not df.empty else ["세부 특징 추출 실패"]
                 feature_details = "\n".join(f"- {r}" for r in reasons)
+                prompt = url_prompt.format(user_query=text, bert_result=bert_result, feature_details=feature_details)
+                ans = llm.invoke(prompt).content
+                response = {"answer": ans, "mode": "url_analysis_detailed", "url": url}
             except Exception as e:
-                feature_details = f"세부 특징 추출 오류: {e}"
-
-            prompt = url_prompt.format(user_query=text, bert_result=bert_result, feature_details=feature_details)
-            try: ans = llm.invoke(prompt).content
-            except Exception: ans = "상세 분석 생성 실패"
-            return {"answer": ans, "mode":"url_analysis_detailed","url":url}
+                response = {"answer": "URL 상세 분석 중 오류가 발생했어요.", "mode": "url_error"}
         else:
+            # ... 간단 분석 로직 ...
             prompt = simple_url_prompt.format(bert_result=bert_result)
-            try: ans = llm.invoke(prompt).content
-            except Exception: ans = "간단 분석 생성 실패"
-            return {"answer": ans, "mode":"url_analysis_simple","url":url}
-
-    # 3) RAG vs CHAT 라우터
-    action = "CHAT"
-    if RAG_CHAT_ROUTER_MODEL:
-        try:
-            action = RAG_CHAT_ROUTER_MODEL.predict([text])[0]
-            log.info(f"RAG_ROUTER predict -> {action} for text: {text!r}")
-        except Exception as e:
-            log.exception(f"RAG router predict 실패: {e}")
-            action = "CHAT"
-
-    # === 새로 추가한 부분: retriever / FAISS 상태 점검 로깅 ===
-    try:
-        # FAISS 인덱스 총 문서 수 출력 (가능하면)
-        if vector_db is not None:
             try:
-                idx = getattr(vector_db, "index", None)
-                if idx is not None and hasattr(idx, "ntotal"):
-                    log.info(f"FAISS index ntotal: {idx.ntotal}")
-                else:
-                    log.info("vector_db.index 또는 ntotal 속성 없음")
-            except Exception:
-                log.exception("FAISS ntotal 조회 중 오류")
-
-        # retriever 테스트 검색
-        if retriever is not None:
-            try:
-                sample_docs = retriever.get_relevant_documents(text)
-                log.info(f"retriever.get_relevant_documents -> {len(sample_docs)} docs")
-                for i, d in enumerate(sample_docs[:3]):
-                    meta = getattr(d, "metadata", {})
-                    snippet = (getattr(d, "page_content", "") or "")[:200]
-                    log.info(f"doc[{i}] source={meta.get('source')} snippet={snippet!r}")
-            except Exception:
-                log.exception("retriever.get_relevant_documents 호출 실패")
-    except Exception:
-        log.exception("retriever/FAISS 상태 점검 중 예외")
-
-    # RAG 호출 블록 (예외 시 스택트레이스 로깅 + 개발시 상세 반환)
-    if action == "RAG" and conversational_rag_chain:
-        try:
-            log.info(f"RAG 호출 시도: text={text!r}")
-            # LangChain이 이해할 수 있는 형식으로 대화 기록 변환
-            langchain_chat_history = format_history_for_langchain(chat_history)
-            
-            # invoke 메서드를 사용하여 체인 호출
-            res = conversational_rag_chain.invoke({
-                "question": text,
-                "chat_history": langchain_chat_history
-            })
-            log.info("RAG 체인 호출 성공")
-            sources = []
-            for doc in res.get("source_documents", []):
-                try: src = getattr(doc, "metadata", {}).get("source")
-                except Exception: src = None
-                if src and src not in sources: sources.append(src)
-            return {"answer": res.get("answer",""), "mode":"rag", "sources":sources}
-
-        except Exception as e:
-            tb = traceback.format_exc()
-            log.error(f"RAG 체인 호출 실패: {e}\n{tb}")
-            # 개발 환경이면 상세 에러 반환
-            if os.environ.get("DEBUG", "").lower() in ("1", "true", "yes"):
-                return {"answer": f"문서 검색 중 오류 (체인 호출 실패): {e}\n{tb}", "mode":"rag_error"}
-            return {"answer":"문서 검색 중 오류 (체인 호출 실패)", "mode":"rag_error"}
-
-    else:
-        # RAG 분기로 안 가는 경우(일반 CHAT 또는 보안 플래그)
-        sec_flag = False
-        try: sec_flag = is_security_related_by_embedding(text, embeddings, SECURITY_CENTROID)
-        except Exception:
-            sec_flag = any(k in text for k in ["보안","해킹","취약점","피싱","랜섬웨어","CVE"])
-
-        if sec_flag and conversational_rag_chain:
-            try:
-                # 안전하게 invoke 호출 시도
-                try:
-                    res = conversational_rag_chain.invoke({"question":text,"chat_history":chat_history})
-                except Exception:
-                    # 마지막 보루: __call__ 시도
-                    res = conversational_rag_chain({"question":text,"chat_history":chat_history})
+                ans = llm.invoke(prompt).content
+                response = {"answer": ans, "mode": "url_analysis_simple", "url": url}
             except Exception as e:
-                log.exception(f"sec_flag 상태에서 conversational_rag_chain 호출 실패: {e}")
-                res = {"answer":"챗봇 오류"}
-            return {"answer": res.get("answer",""), "mode":"chat"}
-        else:
-            try:
-                ans = llm.invoke(f"[대화 기록]\n{history_text}\n{text}").content
-            except Exception:
-                ans = "내부 오류"
-            return {"answer": "죄송합니다. 저는 보안 전문 챗봇으로, 보안 관련 질문에만 답변할 수 있습니다.", "mode":"chat_guardrail"}
+                response = {"answer": "URL을 분석하는 중 오류가 발생했어요.", "mode": "url_error"}
 
+    # --- ✨ 3) RAG / CHAT / 가드레일 처리 (수정된 부분) ---
+    else:
+        # 라우터가 RAG를 추천하는지 먼저 확인
+        action = "CHAT"
+        if RAG_CHAT_ROUTER_MODEL:
+            try:
+                action = RAG_CHAT_ROUTER_MODEL.predict([text])[0]
+            except Exception:
+                action = "CHAT"
+
+        # 라우터와 별개로, 임베딩 기반으로 보안 관련 질문인지 확인
+        sec_flag = False
+        try:
+            sec_flag = is_security_related_by_embedding(text, embeddings, SECURITY_CENTROID)
+        except Exception:
+            sec_flag = any(k in text for k in ["보안", "해킹", "취약점", "피싱", "랜섬웨어", "CVE"])
+
+        # <조건> 라우터가 'RAG'이거나, 내용 자체가 '보안 관련'일 경우 -> RAG로 답변 시도
+        if (action == "RAG" or sec_flag) and conversational_rag_chain:
+            try:
+                langchain_chat_history = format_history_for_langchain(chat_history)
+                res = conversational_rag_chain.invoke({
+                    "question": text,
+                    "chat_history": langchain_chat_history
+                })
+                sources = [doc.metadata.get("source") for doc in res.get("source_documents", []) if doc.metadata.get("source")]
+                response = {"answer": res.get("answer", ""), "mode": "rag", "sources": list(set(sources))}
+            except Exception as e:
+                log.error(f"RAG 체인 호출 실패: {e}")
+                response = {"answer": "문서 검색 중 오류가 발생했어요.", "mode": "rag_error"}
+        # <조건> 위 경우가 아닐 경우 (보안과 관련 없는 질문) -> 가드레일 메시지 출력
+        else:
+            response = {"answer": "죄송합니다. 저는 보안 전문 챗봇으로, 보안 관련 질문에만 답변할 수 있습니다.", "mode": "chat_guardrail"}
+
+
+    # --- 4. (SAVE) 이번 대화를 Redis에 저장하기 ---
+    if session_id and REDIS_AVAILABLE and response.get("answer"):
+        try:
+            append_message(session_id, "user", query)
+            append_message(session_id, "assistant", response["answer"])
+        except Exception as e:
+            log.error(f"Redis에 대화 기록 저장 중 오류 발생: {e}")
+
+    return response
 
 if __name__=="__main__":
     print("--- 챗봇 시작 (종료: '종료') ---")
