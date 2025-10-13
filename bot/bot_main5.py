@@ -216,7 +216,6 @@ def get_chatbot_response(query: str, session_id: Optional[str] = None) -> Dict[s
 
     # 2) URL 분석 처리
     elif match:
-        # (이전 답변과 동일, 변경 없음)
         url = match.group(1)
         try:
             bert_result = url_tool.func(url)
@@ -244,7 +243,7 @@ def get_chatbot_response(query: str, session_id: Optional[str] = None) -> Dict[s
             except Exception as e:
                 response = {"answer": "URL을 분석하는 중 오류가 발생했어요.", "mode": "url_error"}
 
-    # --- ✨ 3) RAG / CHAT / 가드레일 처리 (수정된 부분) ---
+    # --- ✨ 3) RAG / CHAT / 가드레일 처리 ---
     else:
         # 라우터가 RAG를 추천하는지 먼저 확인
         action = "CHAT"
@@ -275,8 +274,16 @@ def get_chatbot_response(query: str, session_id: Optional[str] = None) -> Dict[s
                 log.error(f"RAG 체인 호출 실패: {e}")
                 response = {"answer": "문서 검색 중 오류가 발생했어요.", "mode": "rag_error"}
         # <조건> 위 경우가 아닐 경우 (보안과 관련 없는 질문) -> 가드레일 메시지 출력
-        else:
-            response = {"answer": "죄송합니다. 저는 보안 전문 챗봇으로, 보안 관련 질문에만 답변할 수 있습니다.", "mode": "chat_guardrail"}
+        else: 
+            GREETING_KEYWORDS = ["안녕", "하이", "ㅎㅇ", "hi", "hello"]
+            if text.lower() in GREETING_KEYWORDS:
+                friendly_greeting = (
+                    "안녕하세요! 무엇을 도와드릴까요? "
+                    "큐싱, 피싱, URL 보안 등 궁금한 점이 있으시면 언제든지 물어보세요."
+                )
+                response = {"answer": friendly_greeting, "mode": "chat_greeting"}
+            else:
+                response = {"answer": "죄송합니다. 저는 보안 전문 챗봇으로, 보안 관련 질문에만 답변할 수 있습니다. ", "mode": "chat_guardrail"}
 
 
     # --- 4. (SAVE) 이번 대화를 Redis에 저장하기 ---
