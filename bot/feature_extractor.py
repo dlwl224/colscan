@@ -225,37 +225,50 @@ def _score_and_explain(f: Dict[str, Any]) -> List[Tuple[float, str, str, str]]:
 
     # WHOIS
     def _logic_domain_age_days(v):
-        if v < 30:   return (+2.0, f"도메인 생성 {int(v)}일 — **매우 최근**")
-        if v < 180:  return (+1.0, f"도메인 생성 {int(v)}일 — **최근 등록**")
-        if v > 365:  return (-0.5, f"도메인 나이 {int(v)}일 — **1년 이상 유지**")
+        if v < 30:   return (+2.0, f"사이트 주소가 생긴 지 **{int(v)}일**밖에 안 된 '매우 최근 사이트'예요.")
+        if v < 180:  return (+1.0, f"사이트 주소가 생긴 지 **{int(v)}일** 된 최신 사이트예요.")
+        if v > 365:  return (-0.5, f"주소가 생긴 지 **1년 이상** 되어 비교적 신뢰할 수 있어요.")
         return None
     add_num("domain_age_days", _logic_domain_age_days)
 
     def _logic_days_to_expiry(v):
-        if v < 0:   return (+1.4, "도메인 **만료됨/지남** 가능성")
-        if v < 30:  return (+0.8, f"만료까지 {int(v)}일 — **임박**")
+        if v < 0:   return (+1.4, "주소의 '사용 기간'이 이미 **만료**되었을 수 있어요.")
+        if v < 30:  return (+0.8, f"주소 '사용 기간'이 **{int(v)}일**밖에 남지 않아 곧 사라질 수 있어요.")
         return None
     add_num("days_to_expiry", _logic_days_to_expiry)
 
     if f.get("whois_available") is False:
-        C.append((+0.8, "WHOIS 정보 **부재/비공개**", "whois_available", "whois"))
+        C.append((+0.8, "사이트 **소유자 정보(WHOIS)가 비공개**", "whois_available", "whois"))
 
     # URL (binary)
-    if bool(f.get("contains_ip")):       C.append((+1.4, "URL에 **IP 주소** 포함", "contains_ip", "url"))
+    if bool(f.get("contains_ip")):       C.append((+1.4, "주소가 `google.com` 같은 이름 대신 **숫자(IP)** 포함", "contains_ip", "url"))
     if bool(f.get("has_at_symbol")):     C.append((+1.1, "URL에 **@ 기호** 포함", "has_at_symbol", "url"))
-    if bool(f.get("shortened_url")):     C.append((+1.0, "단축 URL 사용 — **정보 감춤 가능성**", "shortened_url", "url"))
-    if bool(f.get("is_punycode")):       C.append((+0.7, "Punycode — **유사 도메인 위장** 가능성", "is_punycode", "url"))
-    if bool(f.get("encoding")):          C.append((+0.6, "인코딩 토큰(%xx/base64) — **가독성 저하**", "encoding", "url"))
+    if bool(f.get("shortened_url")):     C.append((+1.0, "**주소 줄임(단축 URL) 서비스**를 사용 — **정보 감춤 가능성**", "shortened_url", "url"))
+    if bool(f.get("is_punycode")):       C.append((+0.7, "주소에 **알파벳 외의 문자(Punycode)가 섞여**— **유사 도메인 위장** 가능성", "is_punycode", "url"))
+    if bool(f.get("encoding")):          C.append((+0.6, "주소에 알아보기 힘든 인코딩 토큰(%xx/base64) — **가독성 저하**", "encoding", "url"))
     if bool(f.get("contains_port")):     C.append((+0.4, "비표준 **포트 번호** 포함", "contains_port", "url"))
-    if bool(f.get("file_extension")):    C.append((+0.5, "경로에 **파일 확장자** 포함", "file_extension", "url"))
+    if bool(f.get("file_extension")):    C.append((+0.5, "주소 경로에 **파일(.exe, .zip 등)**이 포함", "file_extension", "url"))
     if bool(f.get("phishing_keywords")): C.append((+1.2, "피싱 **키워드** 포함", "phishing_keywords", "url"))
-    if bool(f.get("free_domain")):       C.append((+0.8, "무료 도메인 TLD 사용", "free_domain", "url"))
+    if bool(f.get("free_domain")):       C.append((+0.8, "신뢰도가 낮은 무료 도메인 TLD 사용", "free_domain", "url"))
     if bool(f.get("has_hash")):          C.append((+0.2, "#(프래그먼트) 포함", "has_hash", "url"))
 
     # URL (numeric)
     def _logic_subdomain_count(v):
-        if v >= 3: return (+1.0, f"서브도메인 **{int(v)}개** — 과다")
-        return None
+        if v >= 3: 
+            try:
+                # 전체 URL 정보가 담긴 f 딕셔너리에서 'url'을 가져옵니다.
+                full_url = f.get('url', '')
+                parsed_url = urlparse(full_url)
+                # 도메인을 '.'으로 나눈 뒤, 마지막 두 개(메인도메인+TLD)를 제외한 나머지가 서브도메인입니다.
+                subdomains = ".".join(parsed_url.netloc.split('.')[:-2])
+                if subdomains:
+                    # 서브도메인이 존재하면 예시로 포함하여 설명합니다.
+                    return (+1.0, f"주소의 세부 단계(서브도메인)({subdomains})가 **{int(v)}개**로 과도하게 많아요.")
+            except:
+                # 예시 추출에 실패하면 기존 방식으로 설명합니다.
+                pass 
+            return (+1.0, f"주소의 세부 단계(서브도메인) **{int(v)}개** — 과다")
+        
     add_num("subdomain_count", _logic_subdomain_count)
 
     def _logic_url_length(v):
@@ -291,33 +304,33 @@ def _score_and_explain(f: Dict[str, Any]) -> List[Tuple[float, str, str, str]]:
 
     # 콘텐츠/크롤링
     def _logic_ext(v):
-        if v >= 0.80: return (+1.1, f"외부 리소스 비율 **{v:.2f}** — 높음")
-        if v >= 0.50: return (+0.6, f"외부 리소스 비율 **{v:.2f}** — 다소 높음")
+        if v >= 0.80: return (+1.1, f"외부 리소스(이미지 등) 비율 **{v:.2f}** — 높음")
+        if v >= 0.50: return (+0.6, f"외부 리소스(이미지 등) 비율 **{v:.2f}** — 다소 높음")
         return None
     add_num("extUrlRatio", _logic_ext)
 
     def _logic_ea(v):
-        if v >= 0.80: return (+1.1, f"외부 앵커 비율 **{v:.2f}** — 높음")
-        if v >= 0.50: return (+0.6, f"외부 앵커 비율 **{v:.2f}** — 다소 높음")
+        if v >= 0.80: return (+1.1, f"다른 사이트로 연결되는 '외부 링크'의 비율 **{v:.2f}** — 높음")
+        if v >= 0.50: return (+0.6, f"다른 사이트로 연결되는 '외부 링크'의 비율 **{v:.2f}** — 다소 높음")
         return None
     add_num("externalAnchorRatio", _logic_ea)
 
     def _logic_ia(v):
-        if v >= 0.30: return (+1.1, f"잘못된 앵커 비율 **{v:.2f}** — 높음")
-        if v >= 0.10: return (+0.6, f"잘못된 앵커 비율 **{v:.2f}** — 다소 높음")
+        if v >= 0.30: return (+1.1, f"작동하지 않는 '깨진 링크'의 비율 **{v:.2f}** — 높음")
+        if v >= 0.10: return (+0.6, f"작동하지 않는 '깨진 링크'의 비율 **{v:.2f}** — 다소 높음")
         return None
     add_num("invalidAnchorRatio", _logic_ia)
 
     # SSL
     def _logic_cert_days(v):
-        if v < 90:   return (+0.5, f"SSL 유효기간 **{int(v)}일** — 짧음")
-        if v > 365:  return (-0.3, f"SSL 유효기간 **{int(v)}일** — 길음")
+        if v < 90:   return (+0.5, f"사이트 신분증(SSL)의 유효기간 **{int(v)}일** — 짧음")
+        if v > 365:  return (-0.3, f"사이트 신분증(SSL)의 유효기간 **{int(v)}일** — 길음")
         return None
     add_num("cert_total_days", _logic_cert_days)
 
     https = f.get("is_https")
-    if https == 1 or https is True:  C.append((-0.2, "HTTPS 사용 — 전송구간 **암호화**", "is_https", "ssl"))
-    elif https == 0 or https is False: C.append((+1.0, "HTTPS **미사용**", "is_https", "ssl"))
+    if https == 1 or https is True:  C.append((-0.2, "**보안 접속(HTTPS)을 사용** — 전송구간 **암호화**", "is_https", "ssl"))
+    elif https == 0 or https is False: C.append((+1.0, "정보가 암호화되지 않는 **일반 접속(HTTP)을 사용**", "is_https", "ssl"))
 
     return C
 
