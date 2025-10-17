@@ -178,6 +178,7 @@ def format_history_for_langchain(chat_history: Optional[Any]) -> list:
 # bot_main5.py의 get_chatbot_response 함수를 아래 코드로 전체 교체해주세요.
 
 def get_chatbot_response(query: str, session_id: Optional[str] = None) -> Dict[str, Any]:
+    print("➡️ [2/3] bot/bot_main5.py: get_chatbot_response 함수가 시작되었습니다.")
     """
     사용자 쿼리를 처리하고, Redis를 이용해 대화 기록을 관리하여 응답을 반환합니다.
     """
@@ -198,6 +199,11 @@ def get_chatbot_response(query: str, session_id: Optional[str] = None) -> Dict[s
 
     history_text = history_to_text(chat_history)
     match = URL_PATTERN.search(text)
+    if match:
+        print(f"✅ [bot/bot_main5.py] URL을 찾았습니다: {match.group(1)}")
+    else:
+        print("❌ [bot/bot_main5.py] URL을 찾지 못했습니다. URL 분석 로직을 건너뜁니다.")
+
     is_why_question = any(k in text for k in WHY_KEYWORDS)
     is_memory_question = any(k in text for k in MEMORY_KEYWORDS)
 
@@ -217,6 +223,7 @@ def get_chatbot_response(query: str, session_id: Optional[str] = None) -> Dict[s
     # 2) URL 분석 처리
     elif match:
         url = match.group(1)
+        print("➡️ [3/3] bot/bot_main5.py: url_tool.run()을 호출하여 urlbert_tool.py를 실행합니다.")
         try:
             bert_result = url_tool.func(url)
         except Exception as e:
@@ -236,15 +243,20 @@ def get_chatbot_response(query: str, session_id: Optional[str] = None) -> Dict[s
                 response = {"answer": "URL 상세 분석 중 오류가 발생했어요.", "mode": "url_error"}
         else:
             # ... 간단 분석 로직 ...
-            prompt = simple_url_prompt.format(bert_result=bert_result)
+            prompt = simple_url_prompt.format(bert_result=bert_result, url=url)
             try:
                 ans = llm.invoke(prompt).content
                 response = {"answer": ans, "mode": "url_analysis_simple", "url": url}
             except Exception as e:
                 response = {"answer": "URL을 분석하는 중 오류가 발생했어요.", "mode": "url_error"}
 
-    # --- ✨ 3) RAG / CHAT / 가드레일 처리 ---
+    # ---  3) RAG / CHAT / 가드레일 처리 ---
     else:
+        print("\n--- RAG 진단 시작 ---")
+        
+        # 1. RAG 체인이 정상적으로 로드되었는지 확인
+        print(f"1. RAG 체인 로드 여부: {'✅ 로드됨' if conversational_rag_chain else '❌ 로드 실패'}")
+
         # 라우터가 RAG를 추천하는지 먼저 확인
         action = "CHAT"
         if RAG_CHAT_ROUTER_MODEL:
@@ -252,16 +264,28 @@ def get_chatbot_response(query: str, session_id: Optional[str] = None) -> Dict[s
                 action = RAG_CHAT_ROUTER_MODEL.predict([text])[0]
             except Exception:
                 action = "CHAT"
+        print(f"2. 라우터 판단 결과 (action): '{action}'")
 
         # 라우터와 별개로, 임베딩 기반으로 보안 관련 질문인지 확인
         sec_flag = False
         try:
-            sec_flag = is_security_related_by_embedding(text, embeddings, SECURITY_CENTROID)
-        except Exception:
-            sec_flag = any(k in text for k in ["보안", "해킹", "취약점", "피싱", "랜섬웨어", "CVE"])
+            # 1차: 임베딩으로 체크
+            if is_security_related_by_embedding(text, embeddings, SECURITY_CENTROID):
+                sec_flag = True
+        except Exception as e:
+            print(f"임베딩 체크 중 오류: {e}")
+
+        # 2차: 임베딩이 놓쳤을 경우, 키워드로 한 번 더 체크 (강화된 안전망)
+        if not sec_flag:
+            keyword_list = ["큐싱", "피싱", "스미싱", "보안", "해킹", "취약점", "랜섬웨어", "CVE"]
+            if any(k in text for k in keyword_list):
+                sec_flag = True
+        print(f"3. 임베딩/키워드 판단 결과 (sec_flag): {sec_flag}")
+
 
         # <조건> 라우터가 'RAG'이거나, 내용 자체가 '보안 관련'일 경우 -> RAG로 답변 시도
         if (action == "RAG" or sec_flag) and conversational_rag_chain:
+            print("4. 최종 판단: ✅ RAG 실행")
             try:
                 langchain_chat_history = format_history_for_langchain(chat_history)
                 res = conversational_rag_chain.invoke({
@@ -275,6 +299,7 @@ def get_chatbot_response(query: str, session_id: Optional[str] = None) -> Dict[s
                 response = {"answer": "문서 검색 중 오류가 발생했어요.", "mode": "rag_error"}
         # <조건> 위 경우가 아닐 경우 (보안과 관련 없는 질문) -> 가드레일 메시지 출력
         else: 
+            print("4. 최종 판단: ❌ RAG 건너뛰고 가드레일 응답")
             GREETING_KEYWORDS = ["안녕", "하이", "ㅎㅇ", "hi", "hello"]
             if text.lower() in GREETING_KEYWORDS:
                 friendly_greeting = (

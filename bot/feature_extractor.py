@@ -256,19 +256,17 @@ def _score_and_explain(f: Dict[str, Any]) -> List[Tuple[float, str, str, str]]:
     def _logic_subdomain_count(v):
         if v >= 3: 
             try:
-                # 전체 URL 정보가 담긴 f 딕셔너리에서 'url'을 가져옵니다.
                 full_url = f.get('url', '')
                 parsed_url = urlparse(full_url)
-                # 도메인을 '.'으로 나눈 뒤, 마지막 두 개(메인도메인+TLD)를 제외한 나머지가 서브도메인입니다.
-                subdomains = ".".join(parsed_url.netloc.split('.')[:-2])
-                if subdomains:
-                    # 서브도메인이 존재하면 예시로 포함하여 설명합니다.
-                    return (+1.0, f"주소의 세부 단계(서브도메인)({subdomains})가 **{int(v)}개**로 과도하게 많아요.")
-            except:
-                # 예시 추출에 실패하면 기존 방식으로 설명합니다.
-                pass 
-            return (+1.0, f"주소의 세부 단계(서브도메인) **{int(v)}개** — 과다")
-        
+                parts = parsed_url.netloc.split('.')
+                if len(parts) > 2:
+                    main_domain = ".".join(parts[-2:])
+                    subdomain_part = ".".join(parts[:-2])
+                    if subdomain_part:
+                        return (+1.0, f"메인 주소 '{main_domain}' 앞에 '**{subdomain_part}**'와 같이 주소 단계가 너무 많아요.")
+            except: pass
+            return (+1.0, f"주소의 세부 단계(서브도메인)가 **{int(v)}개**로 과도하게 많아요.")
+        return None
     add_num("subdomain_count", _logic_subdomain_count)
 
     def _logic_url_length(v):
@@ -304,8 +302,8 @@ def _score_and_explain(f: Dict[str, Any]) -> List[Tuple[float, str, str, str]]:
 
     # 콘텐츠/크롤링
     def _logic_ext(v):
-        if v >= 0.80: return (+1.1, f"외부 리소스(이미지 등) 비율 **{v:.2f}** — 높음")
-        if v >= 0.50: return (+0.6, f"외부 리소스(이미지 등) 비율 **{v:.2f}** — 다소 높음")
+        if v >= 0.80: return (+1.1, f"외부 사이트의 파일을 불러오는 비율 **{v:.2f}** — 높음")
+        if v >= 0.50: return (+0.6, f"외부 사이트의 파일을 불러오는 비율 **{v:.2f}** — 다소 높음")
         return None
     add_num("extUrlRatio", _logic_ext)
 
